@@ -12,3 +12,6 @@
 !reports/images/*.jpg
 !reports/images/*.jpeg
 !reports/images/*.png
+
+.vercel
+.env*
