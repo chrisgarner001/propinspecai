@@ -191,6 +191,30 @@ Not applicable yet — no file-level implementation plan exists for Approach A (
 - **Zinspector's report taxonomy** (room/area breakdown, Detail × Condition × Actions × Comment structure) — informs PropInspecAI's own data model even though the tool itself is being replaced. Notably, Zinspector's own "Actions" field already exists and goes unused — free-text Comment is where real repair data lives today.
 - **Courtney's existing spreadsheet/quote template** — the actual target output format for the owner rehab quote. Not yet in hand; getting a copy is a concrete near-term task (see Implementation Tasks).
 
+## Review Dashboard — Test Coverage Diagram (planned, pre-code)
+
+```
+CODE PATHS (planned)                                    USER FLOWS (planned)
+[+] Data model (Supabase/Postgres)                      [+] Jessica opens an inspection
+  ├── inspections table                                   ├── [GAP] Sees pre-populated line items
+  ├── line_items table (item/condition/assigned_to/         from the AI extraction pass
+  │    materials/labor/tenant_charge_or_approved)          ├── [GAP] Edits a materials/labor field -> saves
+  └── [GAP] Multi-user access? Only Jessica named so far  ├── [GAP] Adds a line item the AI missed
+    — Chuck/Courtney access not yet decided               └── [GAP] Sets Tenant Charge / Approved per line
+[+] Review UI (Next.js)
+  ├── [GAP] Editable materials/labor fields              [+] Export flow
+  ├── [GAP] Editable vendor cost estimate                  ├── [GAP] Generate Tenant Move-Out PDF
+  ├── [GAP] Add-row control                                ├── [GAP] Generate Internal PDF
+  └── [GAP] Tenant Charge / Approved radio group            └── [GAP] Generate Excel Quote Sheet
+[+] Export generation
+  ├── generateTenantPDF() [→make-pdf reuse]
+  ├── generateInternalPDF() [→make-pdf reuse]
+  └── generateExcelQuoteSheet() [→exceljs, NEW dependency]
+
+COVERAGE: 0/13 paths (expected — no implementation exists yet)
+GAPS: 13 — feed Implementation Tasks below
+```
+
 ## Implementation Tasks
 
 Synthesized from this review's findings — pre-implementation scoping tasks, not code tasks, since Approach A has no implementation plan yet.
@@ -215,6 +239,22 @@ Synthesized from this review's findings — pre-implementation scoping tasks, no
   - Surfaced by: Test review diagram gaps — output delivery.
   - Files: n/a
   - Verify: delivery path documented (email, shared Drive folder, etc.).
+- [ ] **T6 (P1, human: ~1hr / CC: ~15min)** — Data model — design the Supabase schema (inspections, line_items with item/condition/assigned_to/materials/labor/tenant_charge_or_approved fields).
+  - Surfaced by: Review Dashboard test coverage diagram.
+  - Files: (new) `supabase/migrations/`
+  - Verify: schema supports every field in the sample report + add-row.
+- [ ] **T7 (P2, human: ~30min / CC: ~5min)** — Scoping — Decide dashboard access: Jessica-only, or does Chuck/Courtney need access too? Affects whether Supabase Auth (multi-user) is needed now or can be deferred.
+  - Surfaced by: Review Dashboard test coverage diagram — "multi-user access?" gap.
+  - Files: n/a
+  - Verify: access model documented before auth is built.
+- [ ] **T8 (P1, human: ~3-5 days / CC: ~1-2 days across sessions)** — Build — Next.js dashboard: editable line-item list, materials/labor fields, vendor cost estimate, add-row, Tenant Charge/Approved radio group, wired to Supabase.
+  - Surfaced by: User requirements, 2026-09-09.
+  - Files: (new) Next.js app scaffold
+  - Verify: Jessica can open a real inspection, edit every field type, add a row, and have it persist across a session close/reopen.
+- [ ] **T9 (P1, human: ~1-2 days / CC: ~half day)** — Build — export generation: reuse make-pdf for Tenant Move-Out + Internal PDFs, add exceljs for the Excel Quote Sheet.
+  - Surfaced by: User requirements, 2026-09-09.
+  - Files: (new) export service module
+  - Verify: all 3 outputs generate correctly from one reviewed inspection, matching Courtney's actual spreadsheet format (needs T2's template first).
 
 ## Partial Hand-Test Results (plan-eng-review, 2026-09-09)
 
@@ -247,7 +287,7 @@ Real footage arrived mid-review: job 121939, Chuck Larson, 9/8/26 — 9 short cl
 
 User ran all 3 living-room clips (`20260908_135800.mp4`, `20260908_140314.mp4`, `20260908_140425.mp4`) through ChatGPT directly with an inspector-framed prompt (role: experienced move-out inspector; output: condition rating, specific issue, chargeable-vs-normal-wear judgment, measurements, repair category). Zero product code, zero setup cost.
 
-**The reference Zinspector PDF and this footage are almost certainly the same job** — same inspector (Chuck Larson), same date (9/8/26), and the property name/job-number pairing lines up ("1554 Brest" / job 121939). That makes this a true independent cross-validation: human inspector's official structured report vs. AI extraction from raw video, on the identical unit — not just a thematic echo across different properties.
+**Confirmed: the reference Zinspector PDF and this footage are the same job** — 1554 Brest, Lincoln Park, MI, job 121939, inspected by Chuck Larson on 9/8/26. That makes this a true independent cross-validation: human inspector's official structured report vs. AI extraction from raw video, on the identical unit — not just a thematic echo across different properties.
 
 **Cross-check against the reference report's "Living Room" section — near-perfect match:**
 
@@ -266,6 +306,41 @@ Exact measurement match to the half-inch, and matching findings across every cat
 **Architecture implication — reopens a provisional decision:** the successful test used a single native multimodal model call (ChatGPT processing video+audio directly), not the multi-step pipeline (separate frame extraction + transcription + schema-enforced structuring) decided earlier in this review. That decision was based on general 2026 best-practice research, not a test against this specific footage — and the simpler single-call approach just proved itself sufficient in the real test. **The extraction architecture decision should be re-examined, not treated as settled**, now that real evidence points toward the simpler option being viable. This doesn't undo the human-review-gate decision (still needed regardless of architecture) or the retention/ingestion decisions (unrelated).
 
 **Success Criteria status:** the GPM pilot criterion ("AI-generated report/measurements match a human inspector's output closely enough to be usable") is met on this one real test. Confirming on ~10 real move-outs (as originally scoped) is still worth doing before fully committing engineering resources, but the core risk is substantially de-risked.
+
+**Jessica reviewed the sample report — excited (2026-09-09).** First real reaction from the internal team the whole project is meant to help. Strong internal-adoption signal, and it came with a concrete, specific feature request rather than vague enthusiasm — see Review Dashboard below.
+
+## Review Dashboard (new pipeline stage, spec'd 2026-09-09)
+
+Jessica's requested workflow adds a real stage between "structuring" and "output" — this is a stateful review UI, not another static document, and is a meaningfully bigger build than report generation alone.
+
+**Dashboard requirements:**
+- Lists every item from the inspection (pre-populated from the AI extraction pass).
+- **Materials / Labor cost fields, editable by Jessica** per GPM-staff replacement/install item (supersedes the static blank placeholders in the sample report — those become real editable fields once this exists).
+- **Estimated cost line for vendor work**, editable.
+- **Add-row capability** — Jessica can add a line item the AI pass missed or that she spots herself.
+- **Per-line radio buttons: "Tenant Charge" / "Approved"** — supersedes the earlier plain "Tenant Damage" checkbox from the sample report. This is Jessica's actual review decision per item, not an AI pre-judgment: either it's billed to the tenant, or it's approved as a normal turn cost.
+
+**Three outputs, generated after Jessica's review/approval:**
+1. **Tenant Move-Out report** — the tenant-facing disposition document (carries the legal-disclosure framing already flagged as a constraint).
+2. **Internal report** — GPM's internal copy (closest to what the sample report already is).
+3. **Excel Quote Sheet** — feeds directly into Courtney's quoting process. This is the concrete deliverable that resolves the "match Courtney's spreadsheet format" dependency — still need her actual template to match the format exactly, but the destination and purpose are now explicit.
+
+**Decided (2026-09-09):** real persistent web app — saved state, Jessica can leave and resume, handles multiple inspections over time. Not a single-session script. This is a meaningfully bigger build than anything shipped so far in this session (static reports/PDFs) — needs a backend with storage, editable forms, and three export formats (PDF x2 + Excel).
+
+**Dashboard architecture, decided via plan-eng-review (2026-09-09):**
+- **Stack:** custom Next.js app (not a low-code tool like Retool/Appsmith — considered and rejected for this scope since the custom exports need full control regardless of which UI approach won) + Supabase for Postgres/persistence. Confirmed as 2026 standard "boring by default" pairing, not a novel/risky choice.
+- **Supabase project:** provisioned (URL confirmed live via REST endpoint probe; credentials in this repo's local `.env`, gitignored — DB password only so far, anon/service_role API key still needed for the Supabase client SDK).
+- **Deployment:** Vercel (user already created the project) — natural fit for Next.js, no separate hosting decision needed.
+- **Export generation:** reuse the existing `make-pdf` markdown→PDF pipeline (already validated today with embedded photos) for both PDF outputs (Tenant Move-Out, Internal) — no new PDF library. Add `exceljs` (standard Node library for real .xlsx output, not a CSV hack) for the Excel Quote Sheet — the one format with no existing tooling in this repo.
+
+**Report schema extended (2026-09-09), per user requirements:**
+1. An **Outside Vendor Work Required** summary, pulled to page one, grouping all vendor-assigned items by trade so a reviewer can hand it straight to scheduling — not just a per-item table entry.
+2. A **Materials / Labor cost line** for any GPM-staff item whose action is a replacement or install (not adjustments, cleaning, or securing) — currently blank placeholders pending GPM's price book (not yet built).
+3. A **Tenant Damage checkbox** per item, left unchecked by the AI pass — this is deliberately a reviewer sign-off, not an AI pre-judgment, for tenant chargeback decisions.
+
+These three requirements are now part of the report schema going forward, not one-off asks — apply them to every future sample/real report, not just this living-room one.
+
+**Vendor-assignment rules captured (2026-09-09).** GPM's SOP for which repairs go to outside vendors vs. GPM maintenance staff on rent-ups is now documented at `rules/vendor-assignment-sop.md`. This adds a new required field to the report schema: **Assigned To (GPM Staff / Outside Vendor)**, derived from Trade Category per the SOP — not something the AI should judge freely, since it's a fixed business rule, not an inspection judgment call. Applied retroactively to the living-room sample report. The eventual pipeline needs this SOP as a lookup table/rules engine input to the structuring step, not baked into the extraction prompt as free-form guidance — the rules will change over time (SOP note: "if it changes, update this file").
 
 **Structuring prompt — first draft obtained.** ChatGPT produced a genuinely strong candidate for the "structuring" step's prompt during this test, saved to `prompts/inspection-report-prompt-v1.md` in the repo. Worth noting explicitly: it separates **observed evidence from assessment**, forces every finding/measurement to carry a **timestamp and source** (Narrated / Visually read / Both — directly formalizes the tape-measure finding above), uses **"Indeterminate"** instead of guessing on tenant responsibility, and its output schema (room/item/condition/evidence/responsibility/trade-category/priority/confidence, a repair scope table, and a three-way chargeable/non-chargeable/needs-documentation split) serves both the owner rehab quote and the tenant disposition report from one pass — resolving the "two distinct audiences from one pipeline" constraint and giving the human review gate a much safer starting point than a naive damage list would. Treat as a strong v1, not a finished spec — it hasn't been tested across a full inspection or at scale yet.
 
