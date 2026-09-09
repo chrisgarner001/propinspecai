@@ -243,9 +243,39 @@ Real footage arrived mid-review: job 121939, Chuck Larson, 9/8/26 — 9 short cl
 
 **Net across all 4 clips reviewed:** the visual-only pipeline consistently produces plausible, specific, checkable findings (ceiling crack, broken blind, floor stains, door condition, and now readable measurements) without any narration. This meaningfully de-risks Approach A beyond what the first partial pass showed.
 
+## Hand-Test Result: FULL VALIDATION (ChatGPT, video+audio, 2026-09-09)
+
+User ran all 3 living-room clips (`20260908_135800.mp4`, `20260908_140314.mp4`, `20260908_140425.mp4`) through ChatGPT directly with an inspector-framed prompt (role: experienced move-out inspector; output: condition rating, specific issue, chargeable-vs-normal-wear judgment, measurements, repair category). Zero product code, zero setup cost.
+
+**The reference Zinspector PDF and this footage are almost certainly the same job** — same inspector (Chuck Larson), same date (9/8/26), and the property name/job-number pairing lines up ("1554 Brest" / job 121939). That makes this a true independent cross-validation: human inspector's official structured report vs. AI extraction from raw video, on the identical unit — not just a thematic echo across different properties.
+
+**Cross-check against the reference report's "Living Room" section — near-perfect match:**
+
+| Finding | Official Zinspector report | ChatGPT (video+audio) |
+|---|---|---|
+| Room dimensions | "14 x 11 1/2" | "14 ft × 11½ ft" |
+| Closet | "Adjust strike and door to close" | "Does not latch properly" |
+| Flooring | "Repair aluminum patch at wall vent... caulk base molding" | "Floor needs repair at the vent" |
+| Walls/Ceiling | "Repair anchor holes... Repair crack in ceiling. Repair old patches" | "Mounting holes and poor prior patching"; "Visible crack" |
+| Windows | "Replace mini blinds... clean windows and wells" | "Install new blind"; "Replace mini-blind" |
+| Electrical | "Secure all outlets... clean all devices and cover plates" | "Should be secured; devices/cover plates need cleaning" |
+| Entry/storm door (different clip, cross-referenced against full report) | "Replace sweep... Remove sticker... Clean front storm door" | "Clean it, remove the sticker, install a new bottom sweep" |
+
+Exact measurement match to the half-inch, and matching findings across every category checked. This is the validation The Assignment was designed to produce.
+
+**Architecture implication — reopens a provisional decision:** the successful test used a single native multimodal model call (ChatGPT processing video+audio directly), not the multi-step pipeline (separate frame extraction + transcription + schema-enforced structuring) decided earlier in this review. That decision was based on general 2026 best-practice research, not a test against this specific footage — and the simpler single-call approach just proved itself sufficient in the real test. **The extraction architecture decision should be re-examined, not treated as settled**, now that real evidence points toward the simpler option being viable. This doesn't undo the human-review-gate decision (still needed regardless of architecture) or the retention/ingestion decisions (unrelated).
+
+**Success Criteria status:** the GPM pilot criterion ("AI-generated report/measurements match a human inspector's output closely enough to be usable") is met on this one real test. Confirming on ~10 real move-outs (as originally scoped) is still worth doing before fully committing engineering resources, but the core risk is substantially de-risked.
+
+**Structuring prompt — first draft obtained.** ChatGPT produced a genuinely strong candidate for the "structuring" step's prompt during this test, saved to `prompts/inspection-report-prompt-v1.md` in the repo. Worth noting explicitly: it separates **observed evidence from assessment**, forces every finding/measurement to carry a **timestamp and source** (Narrated / Visually read / Both — directly formalizes the tape-measure finding above), uses **"Indeterminate"** instead of guessing on tenant responsibility, and its output schema (room/item/condition/evidence/responsibility/trade-category/priority/confidence, a repair scope table, and a three-way chargeable/non-chargeable/needs-documentation split) serves both the owner rehab quote and the tenant disposition report from one pass — resolving the "two distinct audiences from one pipeline" constraint and giving the human review gate a much safer starting point than a naive damage list would. Treat as a strong v1, not a finished spec — it hasn't been tested across a full inspection or at scale yet.
+
 ## The Assignment
 
-Before writing another line of code in the `propinspecai` repo: take one real move-out video that already exists (Chuck's), and run it through Claude or ChatGPT **by hand** — no product, no pipeline, just you, this week. See how close the raw output gets to a usable report and rehab line items. Then take that actual generated output — not a description of the idea — and show it to Matt Disken specifically, and ask him directly: would he pay for this monthly? That's the cheapest possible test of both the hardest technical risk and the completely unvalidated external-demand premise, and it costs you an afternoon, not a sprint.
+**Part 1 — DONE (2026-09-09), same day it was assigned.** The technical-risk half is validated (see Hand-Test Result above): ChatGPT's video+audio pass matched the official Zinspector report almost item-for-item, including an exact measurement match.
+
+**Part 2 — still open, and now the real bottleneck:** take this actual generated output — not a description of the idea — and show it to Matt Disken specifically, and ask him directly: would he pay for this monthly? The technical question that seemed hardest turned out to be the easy part. The unvalidated external-demand premise (Premise 3) is now the thing standing between "GPM has a great internal tool" and "Propmind AI has a sellable product."
+
+~~Before writing another line of code in the `propinspecai` repo: take one real move-out video that already exists (Chuck's), and run it through Claude or ChatGPT by hand — no product, no pipeline, just you, this week. See how close the raw output gets to a usable report and rehab line items.~~ *(completed — see above)*
 
 ## What I noticed about how you think
 
