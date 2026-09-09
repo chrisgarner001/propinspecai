@@ -273,7 +273,7 @@ Exact measurement match to the half-inch, and matching findings across every cat
 
 **Part 1 — DONE (2026-09-09), same day it was assigned.** The technical-risk half is validated (see Hand-Test Result above): ChatGPT's video+audio pass matched the official Zinspector report almost item-for-item, including an exact measurement match.
 
-**Part 2 — still open, and now the real bottleneck:** take this actual generated output — not a description of the idea — and show it to Matt Disken specifically, and ask him directly: would he pay for this monthly? The technical question that seemed hardest turned out to be the easy part. The unvalidated external-demand premise (Premise 3) is now the thing standing between "GPM has a great internal tool" and "Propmind AI has a sellable product."
+**Part 2 — deliberately delayed (user decision, 2026-09-09):** the plan was to show Matt Disken the actual output next. User has instead chosen to spend a full month iterating internally with GPM staff (Chuck, Jessica, Courtney) before showing anyone outside the company. That's a real, considered choice, not a stall — the concierge test (Approach C) and Premise 3 validation now happen after that internal month, not before. First internal deliverable: a sample report generated in Zinspector's familiar format (see `reports/living-room-sample-report.pdf` in the repo) for GPM staff to react to.
 
 ~~Before writing another line of code in the `propinspecai` repo: take one real move-out video that already exists (Chuck's), and run it through Claude or ChatGPT by hand — no product, no pipeline, just you, this week. See how close the raw output gets to a usable report and rehab line items.~~ *(completed — see above)*
 
