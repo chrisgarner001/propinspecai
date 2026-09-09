@@ -50,7 +50,7 @@ Real Zinspector move-out report reviewed (2026-09-09): "1554 Brest Move Out 9-9-
 ## Constraints
 
 - Video-based capture must work reliably on-site with variable lighting, phone cameras, and inspector narration quality — accuracy of extracted measurements and damage assessment is the technical crux.
-- **Working assumption (unconfirmed):** measurements are spoken by the inspector ("this room is 12 by 14") and captured via transcription, not visually estimated by AI from the video frame — the latter is a materially harder computer-vision problem and would change the effort estimate for Approach A significantly. Confirm this before scoping the build. (See Reference Material: today's practice is inconsistent ad hoc measurement capture, so this is not a regression either way.)
+- **Measurement capture — CONFIRMED, upgraded from working assumption (hand-test, 2026-09-09):** Chuck physically measures with a tape measure, and the reading is directly legible in-frame (e.g. "25 26 27 28 29 30" clearly visible on a windowsill in `20260908_140314.mp4`). This means measurements do NOT require solving hard visual-estimation computer vision or relying on narration — a vision pass reading the tape measure numbers straight off extracted stills is a viable, much simpler path than either original option in this constraint. Still worth capturing spoken confirmation as a redundant check when narration is available, but it's no longer the only path.
 - **Per-frame geolocation/timestamp must be preserved.** The current Zinspector report stamps GPS + timestamp on every individual photo — real evidentiary value for dispute protection. Extracted video stills need the same per-frame metadata, not one location for the whole video.
 - Output must integrate with GPM's existing quoting/vendor software (system not yet named in this session — needs to be identified before build).
 - Report must satisfy two distinct audiences from one pipeline: the owner-facing rehab quote and the tenant-facing move-out/deposit disposition report — these likely have different format and legal-disclosure requirements.
@@ -114,9 +114,107 @@ Web service — build and iterate directly against the `chrisgarner001/propinspe
 
 ## Dependencies
 
-- Access to real GPM move-out video footage to test extraction accuracy.
-- Identification of GPM's current quoting software and any integration path.
+- Access to real GPM move-out video footage to test extraction accuracy. **(Have it — job 121939, see below.)**
+- Courtney's actual spreadsheet/quote template — needed to know what "matching format" means concretely. Not yet obtained.
 - 2-3 outside PM operator relationships willing to participate in the concierge test.
+
+## Pipeline Diagram (planned, Approach A)
+
+```
+Inspector (Chuck)                 GPM Google Drive              PropInspecAI pipeline
+      |                                  |                              |
+      | shoots video, narrates           |                              |
+      | damage/measurements/repairs      |                              |
+      |--------------------------------->|                              |
+      |                                  | (existing flow, reused)      |
+      |                                  |----- poll every 10-15min --->|
+      |                                  |                              |
+                                                                          v
+                                                          +--------------------------+
+                                                          | 1. Extract stills        |
+                                                          |    (ffmpeg, w/ per-frame |
+                                                          |     GPS + timestamp)     |
+                                                          | 2. Transcribe audio      |
+                                                          +--------------------------+
+                                                                          |
+                                                                          v
+                                                          +--------------------------+
+                                                          | 3. Structure (schema-    |
+                                                          |    enforced tool-call):  |
+                                                          |    rooms, condition,     |
+                                                          |    measurements, repairs |
+                                                          +--------------------------+
+                                                                          |
+                                                                          v
+                                                          +--------------------------+
+                                                          | 4. HUMAN REVIEW GATE     |<--- required before
+                                                          |    (Jessica/Courtney?    |     anything ships —
+                                                          |     WHO does this — open |     legal-disclosure +
+                                                          |     question)            |     validation layer
+                                                          +--------------------------+
+                                                                          |
+                                                    +---------------------+---------------------+
+                                                    v                                             v
+                                     +----------------------------+              +----------------------------+
+                                     | 5a. Owner rehab quote       |              | 5b. Tenant move-out /       |
+                                     |     (Courtney's spreadsheet |              |     deposit disposition    |
+                                     |     format — TBD)           |              |     report (+ dispute      |
+                                     |     [vendor pricing source  |              |     notice, per reference  |
+                                     |      still undefined]       |              |     report)                |
+                                     +----------------------------+              +----------------------------+
+```
+
+## Failure Modes (from Test Review diagram)
+
+No implementation exists yet, so no failure mode has confirmed error handling or a silent-failure verdict — this list restates the 17 test-review gaps as production failure scenarios to design against when Approach A is actually built:
+
+- **Structuring step returns incomplete/ambiguous data** (e.g. inspector never states a measurement) → must NOT silently omit the field; should flag it for the human reviewer explicitly, not leave a blank the reviewer might miss.
+- **Corrupt/malformed video file lands in Drive** → pipeline must fail loudly (alert Jessica/Courtney) not silently skip the file.
+- **Reviewer rejects a draft report** → undefined today (see Test review diagram gap) — needs an explicit "send back to re-inspect vs. edit manually" path before this ships.
+- **Output delivery to owner/tenant is undefined** → currently no mechanism specified at all; this is a real gap, not just an edge case.
+
+## Worktree Parallelization Strategy
+
+Not applicable yet — no file-level implementation plan exists for Approach A (this review is at the architecture/design-doc stage, repo is still empty). Revisit this analysis once Approach A has an actual implementation plan with named files/modules.
+
+## NOT in Scope
+
+- **Approach B (multi-tenant Propmind AI platform)** — deferred until Approach C's concierge test produces a real external yes (Premise 3).
+- **Any API integration with GPM's quoting software** — doesn't exist; it's manual/spreadsheet-based. v1 generates a matching spreadsheet output instead of integrating with a system.
+- **New mobile app or upload UI for inspectors** — unnecessary; inspectors already upload to GPM's corporate Google Drive today.
+- **Vendor pricing/rate-card automation logic** — the source of that data is still an open question (Premise 2's hardest part) and isn't scoped in this review.
+- **Legal review of video retention/consent policy** — raised during cross-model review; user's call was "not a concern, proceed as decided" — noted, not blocking, but not investigated further here.
+
+## What Already Exists (reuse, don't rebuild)
+
+- **GPM's Google Drive upload flow** — inspectors already use it daily; the pipeline should watch this existing folder, not build new ingestion UI.
+- **Zinspector's report taxonomy** (room/area breakdown, Detail × Condition × Actions × Comment structure) — informs PropInspecAI's own data model even though the tool itself is being replaced. Notably, Zinspector's own "Actions" field already exists and goes unused — free-text Comment is where real repair data lives today.
+- **Courtney's existing spreadsheet/quote template** — the actual target output format for the owner rehab quote. Not yet in hand; getting a copy is a concrete near-term task (see Implementation Tasks).
+
+## Implementation Tasks
+
+Synthesized from this review's findings — pre-implementation scoping tasks, not code tasks, since Approach A has no implementation plan yet.
+
+- [ ] **T1 (P1, human: ~1 afternoon / CC: ~15min)** — Validation — Run The Assignment: hand-test one of Chuck's real clips (job 121939) through Claude.ai or ChatGPT directly for full video+audio understanding.
+  - Surfaced by: Outside voice finding #1 — architecture decided before the core technical risk was validated.
+  - Files: n/a (no pipeline yet)
+  - Verify: output quality vs. the reference Zinspector report's actual findings for the same property.
+- [ ] **T2 (P1, human: ~30min / CC: ~5min)** — Scoping — Get a real copy of Courtney's spreadsheet/quote template.
+  - Surfaced by: What Already Exists — target output format is still unknown in concrete form.
+  - Files: n/a
+  - Verify: template obtained and reviewed against Premise 2's "priced, vendor-ready" bar.
+- [ ] **T3 (P2, human: ~1-2hrs / CC: ~20min)** — Scoping — Determine vendor pricing/rate-card data source.
+  - Surfaced by: Outside voice finding #3 — the actual differentiator is the least-defined part of the plan.
+  - Files: n/a
+  - Verify: a named source (historical GPM rates, vendor rate card, or other) is documented in the design doc.
+- [ ] **T4 (P2, human: ~30min / CC: ~10min)** — Scoping — Decide who performs the human review/approval gate (Jessica? Courtney? someone new?) and what "reject" does.
+  - Surfaced by: Test review diagram gaps — review flow.
+  - Files: n/a
+  - Verify: review-gate owner and reject-path documented.
+- [ ] **T5 (P3, human: ~30min / CC: ~10min)** — Scoping — Define output delivery mechanism for the finished owner quote and tenant report.
+  - Surfaced by: Test review diagram gaps — output delivery.
+  - Files: n/a
+  - Verify: delivery path documented (email, shared Drive folder, etc.).
 
 ## Partial Hand-Test Results (plan-eng-review, 2026-09-09)
 
@@ -125,6 +223,23 @@ Real footage arrived mid-review: job 121939, Chuck Larson, 9/8/26 — 9 short cl
 **Result: encouraging.** From stills alone, identified worn/chipped door-frame paint with grime buildup, a bent chain-link fence gate, and a cracked sidewalk section — the fence-gate finding independently matches a real line item from the reference Zinspector report ("Repair post cap on side chain-link fence"). Ceiling fixtures, smoke detector, and flooring read as intact with normal wear.
 
 **What this doesn't test:** measurements, Chuck's specific narrated repair calls, or the normal-wear-vs-chargeable-damage judgment call that usually needs the inspector's voice, not just the image. **Next step:** run the same clip through Claude.ai or ChatGPT directly (native video+audio upload) for the real end-to-end test — this is still owed before the extraction architecture decisions above move from provisional to final.
+
+**Second pass, denser sampling (2026-09-09):** ran a full-clip dense sample (20 frames across a 79-second living-room/entry walkthrough, `20260908_135800.mp4`) and drafted a structured report entry from vision alone:
+
+| Item | Condition | Notes |
+|---|---|---|
+| Ceiling | Damaged | Visible diagonal crack across two frames, plus a separate corner discoloration consistent with an old water stain |
+| Windows (2, diamond-pane) | Damaged | Mini-blind mechanism appears broken/crooked — independently matches a finding pattern ("mini blind... obscured") seen in the reference Zinspector report |
+| Hardwood flooring | Fair/Good | Visible wear and scuffing, no major gouges |
+| Walls | Fair | Minor scuffs, nail holes — cosmetic level |
+| Entry door | Fair | Grime/dirt buildup near handle, normal wear |
+| Electrical | Note | Loose wire/cable visible near a floor outlet |
+
+**This is a stronger result than the first pass:** vision alone caught a real structural issue (ceiling crack) with no narration at all, and produced a plausible condition call on every fixture in the room. Still missing: measurements, Chuck's actual judgment on chargeable-vs-normal-wear, and confirmation that identification is correct (a still can't prove scale the way narration would). The floor under the core idea is solid; the full test (video+audio in Claude.ai/ChatGPT) is still the one that resolves the provisional architecture decisions above.
+
+**Third and fourth clips reviewed (`20260908_140314.mp4`, `20260908_140425.mp4`), 2026-09-09 — MAJOR finding:** Chuck physically measures with a tape measure during inspection, and the reading is directly legible in the video frame itself (see updated Constraints — measurement capture is now CONFIRMED, not just assumed). Also observed: a dark stain/discoloration on hardwood flooring near a coiled electrical cable, a floor heat register in fair/functional condition, an old glass doorknob on an interior door leading to a dark room, and the same front entry door seen in the first pass — now visible from inside, showing a keypad electronic deadbolt in addition to the standard deadbolt, general grime on the door face, and a storm door with a functioning closer arm.
+
+**Net across all 4 clips reviewed:** the visual-only pipeline consistently produces plausible, specific, checkable findings (ceiling crack, broken blind, floor stains, door condition, and now readable measurements) without any narration. This meaningfully de-risks Approach A beyond what the first partial pass showed.
 
 ## The Assignment
 
