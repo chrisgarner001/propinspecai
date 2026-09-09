@@ -1,6 +1,6 @@
 'use server'
 
-import { sql } from '@/lib/db'
+import { getSql } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 
 function toNumberOrNull(value: FormDataEntryValue | null): number | null {
@@ -10,6 +10,7 @@ function toNumberOrNull(value: FormDataEntryValue | null): number | null {
 }
 
 export async function updateLineItem(formData: FormData) {
+  const sql = getSql()
   const id = String(formData.get('id'))
   const inspectionId = String(formData.get('inspection_id'))
 
@@ -33,6 +34,7 @@ export async function updateLineItem(formData: FormData) {
 }
 
 export async function addLineItem(formData: FormData) {
+  const sql = getSql()
   const inspectionId = String(formData.get('inspection_id'))
   const roomArea = String(formData.get('room_area'))
   const item = String(formData.get('item'))

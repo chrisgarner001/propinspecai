@@ -1,4 +1,4 @@
-import { sql } from '@/lib/db'
+import { getSql } from '@/lib/db'
 import { updateLineItem, addLineItem } from '@/app/actions'
 import { notFound } from 'next/navigation'
 
@@ -25,6 +25,7 @@ export default async function InspectionPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
+  const sql = getSql()
 
   const [inspection] = await sql`select * from inspections where id = ${id}`
   if (!inspection) notFound()

@@ -1,4 +1,4 @@
-import { sql } from '@/lib/db'
+import { getSql } from '@/lib/db'
 import Link from 'next/link'
 
 // This lists live database state for an internal review tool — never serve a
@@ -15,13 +15,19 @@ type Inspection = {
 }
 
 export default async function Home() {
+  const sql = getSql()
   const inspections = (await sql`
     select * from inspections order by created_at desc
   `) as unknown as Inspection[]
 
   return (
     <main className="max-w-2xl mx-auto p-6">
-      <h1 className="text-2xl font-bold mb-4">PropInspecAI — Inspections</h1>
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-2xl font-bold">PropInspecAI — Inspections</h1>
+        <Link href="/cost-book" className="text-sm text-blue-600 underline">
+          Cost Book
+        </Link>
+      </div>
       {inspections.length === 0 ? (
         <p className="text-gray-600">No inspections yet.</p>
       ) : (
