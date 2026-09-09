@@ -224,6 +224,8 @@ Real footage arrived mid-review: job 121939, Chuck Larson, 9/8/26 — 9 short cl
 
 **What this doesn't test:** measurements, Chuck's specific narrated repair calls, or the normal-wear-vs-chargeable-damage judgment call that usually needs the inspector's voice, not just the image. **Next step:** run the same clip through Claude.ai or ChatGPT directly (native video+audio upload) for the real end-to-end test — this is still owed before the extraction architecture decisions above move from provisional to final.
 
+**Whisper transcription investigated, deferred (2026-09-09):** user's org has a `whisper-transcription` plugin listed (local whisper.cpp server, CUDA-accelerated) but it has zero adoption/runs and isn't installed on this machine. Checked: no NVIDIA GPU tooling (`nvidia-smi` absent), no whisper.cpp binaries anywhere on disk, nothing listening on any transcription-shaped port. Setting this up (GPU drivers, building whisper.cpp, registering the org marketplace) is real infrastructure work, not a mid-review detour — user chose to proceed with Claude.ai/ChatGPT's native upload for the actual hand-test instead, and treat whisper setup as a separate follow-up if pursued at all.
+
 **Second pass, denser sampling (2026-09-09):** ran a full-clip dense sample (20 frames across a 79-second living-room/entry walkthrough, `20260908_135800.mp4`) and drafted a structured report entry from vision alone:
 
 | Item | Condition | Notes |
