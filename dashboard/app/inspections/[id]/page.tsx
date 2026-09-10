@@ -8,6 +8,8 @@ import LineItemAssignment from '@/app/components/LineItemAssignment'
 import TenantChargeCheckboxes from '@/app/components/TenantChargeCheckboxes'
 import VideoPopupLink from '@/app/components/VideoPopupLink'
 import DeleteInspectionButton from '@/app/components/DeleteInspectionButton'
+import RemoveSectionControl from '@/app/components/RemoveSectionControl'
+import SaveChangesButton from '@/app/components/SaveChangesButton'
 
 const CONDITIONS = ['Good', 'Fair', 'Damaged', 'Not Rated']
 const ASSIGNED_TO_OPTIONS = ['GPM Staff', 'Outside Vendor', 'Other']
@@ -160,13 +162,16 @@ export default async function InspectionPage({
               className={`relative grid ${ROW_COLS} gap-2 items-center px-3 pt-3 pb-7 border-b border-border`}
             >
               <input type="hidden" name="ids" value={li.id} />
-              <button
-                type="submit"
-                formAction={duplicateLineItem.bind(null, li.id, id)}
-                className="absolute bottom-1.5 right-1.5 text-[10px] font-semibold text-text-muted hover:text-accent border border-border hover:border-accent rounded-[var(--radius-sm)] px-1.5 py-0.5 bg-surface"
-              >
-                Duplicate Section
-              </button>
+              <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1.5">
+                <RemoveSectionControl id={li.id} />
+                <button
+                  type="submit"
+                  formAction={duplicateLineItem.bind(null, li.id, id)}
+                  className="text-[10px] font-semibold text-text-muted hover:text-accent border border-border hover:border-accent rounded-[var(--radius-sm)] px-1.5 py-0.5 bg-surface"
+                >
+                  Duplicate Section
+                </button>
+              </div>
               <div role="cell" className="min-w-0 space-y-1">
                 <input
                   name={`room_area__${li.id}`}
@@ -236,12 +241,7 @@ export default async function InspectionPage({
           ))}
         </div>
         <div className="px-6 py-4 border-b border-border flex justify-end">
-          <button
-            type="submit"
-            className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-4 py-2 text-[13px] font-semibold"
-          >
-            Save all changes
-          </button>
+          <SaveChangesButton />
         </div>
       </form>
 

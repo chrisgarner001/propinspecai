@@ -19,6 +19,11 @@ export async function bulkUpdateLineItems(formData: FormData) {
   const laborRate = Number(settings?.gpm_labor_charge ?? 0)
 
   for (const id of ids) {
+    if (formData.get(`remove__${id}`) === '1') {
+      await sql`delete from line_items where id = ${id}`
+      continue
+    }
+
     const roomArea = String(formData.get(`room_area__${id}`) ?? '')
     const item = String(formData.get(`item__${id}`) ?? '')
     const condition = String(formData.get(`condition__${id}`) ?? '')
