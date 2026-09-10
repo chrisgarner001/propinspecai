@@ -13,7 +13,7 @@ const CONDITIONS = ['Good', 'Fair', 'Damaged', 'Not Rated']
 const ASSIGNED_TO_OPTIONS = ['GPM Staff', 'Outside Vendor', 'Other']
 
 const miniField =
-  'text-[12px] border border-border rounded-[var(--radius-sm)] px-1.5 py-1 w-full bg-surface'
+  'text-[12px] border border-border rounded-[var(--radius-sm)] px-1.5 py-1 w-full bg-surface truncate'
 
 type LineItem = {
   id: string
@@ -134,6 +134,7 @@ export default async function InspectionPage({
                   name={`room_area__${li.id}`}
                   defaultValue={li.room_area}
                   placeholder="Room/Area"
+                  title={li.room_area}
                   className={`${miniField} text-[10px] uppercase tracking-wide text-text-muted`}
                 />
                 <div className="flex items-center gap-1.5">
@@ -141,6 +142,7 @@ export default async function InspectionPage({
                     name={`item__${li.id}`}
                     defaultValue={li.item}
                     placeholder="Item"
+                    title={li.item}
                     className={`${miniField} font-semibold`}
                   />
                   {li.is_manual_addition && (
@@ -151,6 +153,7 @@ export default async function InspectionPage({
                   name={`recommended_action__${li.id}`}
                   defaultValue={li.recommended_action ?? ''}
                   placeholder="Recommended action"
+                  title={li.recommended_action ?? ''}
                   className={`${miniField} text-text-muted`}
                 />
                 <div className="border-l-2 border-border pl-2 space-y-1">
@@ -158,6 +161,7 @@ export default async function InspectionPage({
                     name={`observed_evidence__${li.id}`}
                     defaultValue={li.observed_evidence ?? ''}
                     placeholder="Observed evidence"
+                    title={li.observed_evidence ?? ''}
                     className={`${miniField} data-mono text-text-muted`}
                   />
                   <EvidenceStill stillImageFile={li.still_image_file} />

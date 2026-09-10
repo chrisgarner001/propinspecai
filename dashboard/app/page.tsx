@@ -37,7 +37,7 @@ function InspectionTable({ inspections }: { inspections: InspectionRow[] }) {
               </Link>
               <div className="data-mono text-[11px] text-text-muted">Job {i.job_number}</div>
             </td>
-            <td className="px-6 py-3">{i.inspector_name}</td>
+            <td className="px-6 py-3 whitespace-nowrap">{i.inspector_name}</td>
             <td className="px-6 py-3 data-mono text-text-muted">
               {new Date(i.inspection_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}
             </td>
