@@ -61,6 +61,37 @@ export async function bulkUpdateLineItems(formData: FormData) {
   revalidatePath(`/inspections/${inspectionId}`)
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, id, inspectionId) call site; formAction always passes the triggering form's FormData last
+export async function duplicateLineItem(id: string, inspectionId: string, _formData: FormData) {
+  const sql = getSql()
+
+  const [original] = await sql`select * from line_items where id = ${id}`
+  if (!original) return
+
+  // created_at nudged forward 1ms so the duplicate sorts immediately after
+  // the original in the (room_area, created_at) list ordering, directly
+  // below it, rather than at the end of the room group.
+  await sql`
+    insert into line_items (
+      inspection_id, room_area, item, condition, observed_evidence, assigned_to,
+      trade_category, recommended_action, priority, materials_cost, labor_hours,
+      labor_cost, vendor_estimated_cost, tenant_status, is_manual_addition,
+      source_timestamp, source_video_file, still_image_file, vendor_id, created_at
+    )
+    values (
+      ${original.inspection_id}, ${original.room_area}, ${original.item}, ${original.condition},
+      ${original.observed_evidence}, ${original.assigned_to}, ${original.trade_category},
+      ${original.recommended_action}, ${original.priority}, ${original.materials_cost},
+      ${original.labor_hours}, ${original.labor_cost}, ${original.vendor_estimated_cost},
+      ${original.tenant_status}, true,
+      ${original.source_timestamp}, ${original.source_video_file}, ${original.still_image_file},
+      ${original.vendor_id}, ${original.created_at}::timestamptz + interval '1 millisecond'
+    )
+  `
+
+  revalidatePath(`/inspections/${inspectionId}`)
+}
+
 export async function addLineItem(formData: FormData) {
   const sql = getSql()
   const inspectionId = String(formData.get('inspection_id'))

@@ -9,7 +9,12 @@
 Blank Move In Checklist.pdf
 Example Labor Cost Sheet 19946 Kinloch.pdf
 Example Labor Cost Sheet 19946 Kinloch.xlsx
+Turn Scope - 19946 Kinloch 8-25-26 CG WIP.xlsx
 .env
+
+# Secrets -- never version control
+dashboard/google-service-account.json
+gpm-propinspec-*.json
 
 # Exception: report images are intentional artifacts, not raw tenant footage
 !reports/images/*.jpg

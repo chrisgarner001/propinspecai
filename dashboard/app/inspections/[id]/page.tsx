@@ -1,11 +1,12 @@
 import { getSql } from '@/lib/db'
-import { bulkUpdateLineItems, addLineItem } from '@/app/actions'
+import { bulkUpdateLineItems, addLineItem, duplicateLineItem } from '@/app/actions'
 import { notFound } from 'next/navigation'
 import AppShell from '@/app/components/AppShell'
 import StatusSelect from '@/app/components/StatusSelect'
 import VendorSelect from '@/app/components/VendorSelect'
 import EvidenceStill from '@/app/components/EvidenceStill'
 import LaborHoursInput from '@/app/components/LaborHoursInput'
+import TenantChargeCheckboxes from '@/app/components/TenantChargeCheckboxes'
 
 const CONDITIONS = ['Good', 'Fair', 'Damaged', 'Not Rated']
 const ASSIGNED_TO_OPTIONS = ['GPM Staff', 'Outside Vendor', 'Other']
@@ -69,10 +70,12 @@ export default async function InspectionPage({
     <AppShell active="/" reviewerName="Jessica Zilka" title={inspection.property_address} wide>
       <div className="flex items-center justify-end gap-2 px-6 py-3 border-b border-border bg-surface-alt">
         <a
-          href={`/inspections/${id}/export`}
+          href={`/inspections/${id}/turn-scope`}
+          target="_blank"
+          rel="noopener noreferrer"
           className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
         >
-          Download Excel
+          Create Turn Scope
         </a>
         <a
           href={`/inspections/${id}/move-out-report`}
@@ -99,7 +102,7 @@ export default async function InspectionPage({
             role="row"
             className={`grid ${ROW_COLS} gap-2 px-3 py-2.5 border-b border-border`}
           >
-            {['Item', 'Condition', 'Assigned To', 'Materials', 'Labor (hrs)', 'Vendor Est.', 'Tenant Status', 'Approve'].map(
+            {['Item', 'Condition', 'Assigned To', 'Materials', 'Labor (hrs)', 'Vendor Est.', 'Tenant Charge', 'Approve'].map(
               (h) => (
                 <div
                   key={h}
@@ -115,9 +118,16 @@ export default async function InspectionPage({
             <div
               key={li.id}
               role="row"
-              className={`grid ${ROW_COLS} gap-2 items-center px-3 py-3 border-b border-border`}
+              className={`relative grid ${ROW_COLS} gap-2 items-center px-3 pt-3 pb-7 border-b border-border`}
             >
               <input type="hidden" name="ids" value={li.id} />
+              <button
+                type="submit"
+                formAction={duplicateLineItem.bind(null, li.id, id)}
+                className="absolute bottom-1.5 right-1.5 text-[10px] font-semibold text-text-muted hover:text-accent border border-border hover:border-accent rounded-[var(--radius-sm)] px-1.5 py-0.5 bg-surface"
+              >
+                Duplicate Section
+              </button>
               <div role="cell" className="min-w-0 space-y-1">
                 <input
                   name={`room_area__${li.id}`}
@@ -221,28 +231,7 @@ export default async function InspectionPage({
                 placeholder="—"
                 className="data-mono border border-border rounded-[var(--radius-sm)] px-2 py-1 w-full min-w-0 bg-surface disabled:bg-surface-alt disabled:text-text-muted"
               />
-              <div role="cell">
-                <label className="flex items-center gap-1.5 text-[12px] text-text-muted whitespace-nowrap">
-                  <input
-                    type="radio"
-                    name={`tenant_status__${li.id}`}
-                    value="tenant_charge"
-                    defaultChecked={li.tenant_status === 'tenant_charge'}
-                  />
-                  Charge
-                </label>
-              </div>
-              <div role="cell">
-                <label className="flex items-center gap-1.5 text-[12px] text-text-muted whitespace-nowrap">
-                  <input
-                    type="radio"
-                    name={`tenant_status__${li.id}`}
-                    value="approved"
-                    defaultChecked={li.tenant_status === 'approved'}
-                  />
-                  Approved
-                </label>
-              </div>
+              <TenantChargeCheckboxes name={`tenant_status__${li.id}`} defaultValue={li.tenant_status} />
             </div>
           ))}
         </div>
