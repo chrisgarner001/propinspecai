@@ -3,9 +3,8 @@ import { bulkUpdateLineItems, addLineItem, duplicateLineItem } from '@/app/actio
 import { notFound } from 'next/navigation'
 import AppShell from '@/app/components/AppShell'
 import StatusSelect from '@/app/components/StatusSelect'
-import VendorSelect from '@/app/components/VendorSelect'
 import EvidenceStill from '@/app/components/EvidenceStill'
-import LaborHoursInput from '@/app/components/LaborHoursInput'
+import LineItemAssignment from '@/app/components/LineItemAssignment'
 import TenantChargeCheckboxes from '@/app/components/TenantChargeCheckboxes'
 import VideoPopupLink from '@/app/components/VideoPopupLink'
 
@@ -183,50 +182,15 @@ export default async function InspectionPage({
                   ))}
                 </select>
               </div>
-              <div role="cell" className="min-w-0 space-y-1">
-                <select
-                  name={`assigned_to__${li.id}`}
-                  defaultValue={li.assigned_to ?? ''}
-                  className={miniField}
-                >
-                  <option value="">—</option>
-                  {ASSIGNED_TO_OPTIONS.map((a) => (
-                    <option key={a} value={a}>
-                      {a}
-                    </option>
-                  ))}
-                </select>
-                {li.assigned_to === 'Outside Vendor' && (
-                  <VendorSelect name={`vendor_id__${li.id}`} vendors={vendors} defaultValue={li.vendor_id} />
-                )}
-              </div>
-              <input
-                role="cell"
-                name={`materials_cost__${li.id}`}
-                type="number"
-                step="5"
-                defaultValue={li.materials_cost ?? ''}
-                disabled={li.assigned_to !== 'GPM Staff'}
-                placeholder="—"
-                className="data-mono border border-border rounded-[var(--radius-sm)] px-2 py-1 w-full min-w-0 bg-surface disabled:bg-surface-alt disabled:text-text-muted"
-              />
-              <div role="cell" className="min-w-0">
-                <LaborHoursInput
-                  name={`labor_hours__${li.id}`}
-                  defaultValue={li.labor_hours}
-                  rate={laborRate}
-                  disabled={li.assigned_to !== 'GPM Staff'}
-                />
-              </div>
-              <input
-                role="cell"
-                name={`vendor_estimated_cost__${li.id}`}
-                type="number"
-                step="5"
-                defaultValue={li.vendor_estimated_cost ?? ''}
-                disabled={li.assigned_to !== 'Outside Vendor'}
-                placeholder="—"
-                className="data-mono border border-border rounded-[var(--radius-sm)] px-2 py-1 w-full min-w-0 bg-surface disabled:bg-surface-alt disabled:text-text-muted"
+              <LineItemAssignment
+                id={li.id}
+                assignedTo={li.assigned_to}
+                vendorId={li.vendor_id}
+                vendors={vendors}
+                materialsCost={li.materials_cost}
+                laborHours={li.labor_hours}
+                laborRate={laborRate}
+                vendorEstimatedCost={li.vendor_estimated_cost}
               />
               <TenantChargeCheckboxes name={`tenant_status__${li.id}`} defaultValue={li.tenant_status} />
             </div>

@@ -24,6 +24,7 @@ type LineItem = {
   recommended_action: string | null
   assigned_to: string | null
   labor_hours: string | null
+  materials_cost: string | null
   vendor_estimated_cost: string | null
   vendor_name: string | null
 }
@@ -68,7 +69,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const lineItems = (await sql`
     select li.room_area, li.item, li.observed_evidence, li.recommended_action,
-      li.assigned_to, li.labor_hours, li.vendor_estimated_cost, v.name as vendor_name
+      li.assigned_to, li.labor_hours, li.materials_cost, li.vendor_estimated_cost, v.name as vendor_name
     from line_items li
     left join vendors v on v.id = li.vendor_id
     where li.inspection_id = ${id}
@@ -106,6 +107,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         cell({ stringValue: comments }),
         cell({ stringValue: vendorGpm }),
         li.labor_hours !== null ? cell({ numberValue: Number(li.labor_hours) }) : cell({}),
+        li.materials_cost !== null ? cell({ numberValue: Number(li.materials_cost) }) : cell({}),
+        li.vendor_estimated_cost !== null ? cell({ numberValue: Number(li.vendor_estimated_cost) }) : cell({}),
         cell({}),
       ],
     }
@@ -162,9 +165,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
             start: { sheetId: TURN_SCOPE_SHEET_ID, rowIndex: 4, columnIndex: 1 },
             rows: [
               {
-                values: ['Area', 'Details', 'Comments', 'Vendor/GPM', 'Hours', 'Stage '].map((label) =>
-                  cell({ stringValue: label }, true),
-                ),
+                values: [
+                  'Area',
+                  'Details',
+                  'Comments',
+                  'Vendor/GPM',
+                  'Hours',
+                  'Materials',
+                  'Vendor Quote',
+                  'Stage ',
+                ].map((label) => cell({ stringValue: label }, true)),
               },
             ],
             fields: 'userEnteredValue,userEnteredFormat',
@@ -184,6 +194,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
                   cell({}),
                   cell({}),
                   cell({ formulaValue: `=SUM(F${firstDataRow + 1}:F${totalsRow})` }),
+                  cell({}),
+                  cell({}),
                   cell({}),
                 ],
               },
@@ -216,7 +228,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
               startRowIndex: 4,
               endRowIndex: totalsRow,
               startColumnIndex: 1,
-              endColumnIndex: 7,
+              endColumnIndex: 9,
             },
             top: BORDER,
             bottom: BORDER,
@@ -235,9 +247,17 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         },
         {
           updateDimensionProperties: {
-            range: { sheetId: TURN_SCOPE_SHEET_ID, dimension: 'COLUMNS', startIndex: 2, endIndex: 4 },
+            range: { sheetId: TURN_SCOPE_SHEET_ID, dimension: 'COLUMNS', startIndex: 2, endIndex: 3 },
             properties: { pixelSize: 260 },
             fields: 'pixelSize',
+          },
+        },
+        // Comments (D) auto-sized to its content instead of a fixed width --
+        // must run after the data-row updateCells above so it measures the
+        // actual comment text, not an empty column.
+        {
+          autoResizeDimensions: {
+            dimensions: { sheetId: TURN_SCOPE_SHEET_ID, dimension: 'COLUMNS', startIndex: 3, endIndex: 4 },
           },
         },
       ],
