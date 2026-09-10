@@ -6,6 +6,7 @@ import StatusBadge from '@/app/components/StatusBadge'
 import ConditionBadge from '@/app/components/ConditionBadge'
 import VendorSelect from '@/app/components/VendorSelect'
 import EvidenceStill from '@/app/components/EvidenceStill'
+import LaborHoursInput from '@/app/components/LaborHoursInput'
 
 type LineItem = {
   id: string
@@ -18,6 +19,7 @@ type LineItem = {
   recommended_action: string | null
   priority: string | null
   materials_cost: string | null
+  labor_hours: string | null
   labor_cost: string | null
   vendor_estimated_cost: string | null
   tenant_status: string | null
@@ -30,7 +32,13 @@ type LineItem = {
 
 type Vendor = { id: string; name: string }
 
-const ROW_COLS = 'grid-cols-[2fr_0.8fr_0.9fr_0.7fr_0.7fr_0.8fr_0.8fr_0.8fr]'
+// minmax(0, Nfr), not bare Nfr: without the 0 floor, a track's min-content
+// (e.g. a long unbroken Supabase Storage URL in the Item cell) can force
+// that track wider than its fr share, which -- since each row is its own
+// independent grid container -- desyncs that row's column edges from the
+// header row's. minmax(0, ...) caps growth to the fr share so overflowing
+// content wraps/truncates inside the cell instead of pushing columns right.
+const ROW_COLS = 'grid-cols-[minmax(0,2fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,0.8fr)]'
 
 export default async function InspectionPage({
   params,
@@ -48,6 +56,9 @@ export default async function InspectionPage({
   `) as unknown as LineItem[]
 
   const vendors = (await sql`select id, name from vendors order by name`) as unknown as Vendor[]
+
+  const [settings] = await sql`select gpm_labor_charge from settings where id = true`
+  const laborRate = Number(settings?.gpm_labor_charge ?? 0)
 
   return (
     <AppShell active="/" reviewerName="Jessica Zilka" title={inspection.property_address} wide>
@@ -104,7 +115,7 @@ export default async function InspectionPage({
             role="row"
             className={`grid ${ROW_COLS} gap-2 px-3 py-2.5 border-b border-border`}
           >
-            {['Item', 'Condition', 'Assigned To', 'Materials', 'Labor', 'Vendor Est.', 'Tenant Status', 'Approve'].map(
+            {['Item', 'Condition', 'Assigned To', 'Materials', 'Labor (hrs)', 'Vendor Est.', 'Tenant Status', 'Approve'].map(
               (h) => (
                 <div
                   key={h}
@@ -123,7 +134,7 @@ export default async function InspectionPage({
               className={`grid ${ROW_COLS} gap-2 items-center px-3 py-3 border-b border-border`}
             >
               <input type="hidden" name="ids" value={li.id} />
-              <div role="cell">
+              <div role="cell" className="min-w-0">
                 <div className="text-[10px] uppercase tracking-wide text-text-muted">{li.room_area}</div>
                 <div className="font-semibold">
                   {li.item}
@@ -150,10 +161,10 @@ export default async function InspectionPage({
                   </div>
                 )}
               </div>
-              <div role="cell">
+              <div role="cell" className="min-w-0">
                 <ConditionBadge condition={li.condition} />
               </div>
-              <div role="cell">
+              <div role="cell" className="min-w-0">
                 {li.assigned_to === 'Outside Vendor' ? (
                   <VendorSelect name={`vendor_id__${li.id}`} vendors={vendors} defaultValue={li.vendor_id} />
                 ) : (
@@ -170,16 +181,14 @@ export default async function InspectionPage({
                 placeholder="—"
                 className="data-mono border border-border rounded-[var(--radius-sm)] px-2 py-1 w-full min-w-0 bg-surface disabled:bg-surface-alt disabled:text-text-muted"
               />
-              <input
-                role="cell"
-                name={`labor_cost__${li.id}`}
-                type="number"
-                step="0.25"
-                defaultValue={li.labor_cost ?? ''}
-                disabled={li.assigned_to !== 'GPM Staff'}
-                placeholder="—"
-                className="data-mono border border-border rounded-[var(--radius-sm)] px-2 py-1 w-full min-w-0 bg-surface disabled:bg-surface-alt disabled:text-text-muted"
-              />
+              <div role="cell" className="min-w-0">
+                <LaborHoursInput
+                  name={`labor_hours__${li.id}`}
+                  defaultValue={li.labor_hours}
+                  rate={laborRate}
+                  disabled={li.assigned_to !== 'GPM Staff'}
+                />
+              </div>
               <input
                 role="cell"
                 name={`vendor_estimated_cost__${li.id}`}

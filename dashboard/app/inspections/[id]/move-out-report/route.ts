@@ -25,6 +25,7 @@ type LineItem = {
   recommended_action: string | null
   tenant_status: string | null
   materials_cost: string | null
+  labor_hours: string | null
   labor_cost: string | null
 }
 
@@ -51,7 +52,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const lineItems = (await sql`
     select room_area, item, condition, observed_evidence, recommended_action,
-      tenant_status, materials_cost, labor_cost
+      tenant_status, materials_cost, labor_hours, labor_cost
     from line_items
     where inspection_id = ${id}
     order by room_area, created_at
@@ -231,10 +232,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     for (const li of chargedItems) {
       const materials = Number(li.materials_cost ?? 0)
       const labor = Number(li.labor_cost ?? 0)
+      const hours = li.labor_hours !== null ? Number(li.labor_hours) : null
       const total = materials + labor
       grandTotal += total
 
-      ensureSpace(16)
+      const rowHeight = hours !== null ? 24 : 16
+      ensureSpace(rowHeight)
       if (doc.y === PAGE_MARGIN) drawChargeHeader()
       const rowY = doc.y
       doc.font('Helvetica').fontSize(9)
@@ -243,7 +246,17 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       doc.text(li.materials_cost !== null ? `$${materials.toFixed(2)}` : '—', chargeColMaterials, rowY)
       doc.text(li.labor_cost !== null ? `$${labor.toFixed(2)}` : '—', chargeColLabor, rowY)
       doc.text(`$${total.toFixed(2)}`, chargeColTotal, rowY)
-      doc.y = rowY + 16
+      if (hours !== null) {
+        // Reflect the hours x rate calculation, not just the resulting total.
+        const rate = hours > 0 ? labor / hours : 0
+        doc
+          .font('Helvetica')
+          .fontSize(7)
+          .fillColor('#666666')
+          .text(`${hours.toFixed(2)} hrs @ $${rate.toFixed(2)}/hr`, chargeColLabor, rowY + 11)
+          .fillColor('#000000')
+      }
+      doc.y = rowY + rowHeight
       doc
         .moveTo(PAGE_MARGIN, doc.y - 3)
         .lineTo(PAGE_WIDTH - PAGE_MARGIN, doc.y - 3)

@@ -15,9 +15,13 @@ export async function bulkUpdateLineItems(formData: FormData) {
   const inspectionId = String(formData.get('inspection_id'))
   const ids = formData.getAll('ids').map(String)
 
+  const [settings] = await sql`select gpm_labor_charge from settings where id = true`
+  const laborRate = Number(settings?.gpm_labor_charge ?? 0)
+
   for (const id of ids) {
     const materialsCost = toNumberOrNull(formData.get(`materials_cost__${id}`))
-    const laborCost = toNumberOrNull(formData.get(`labor_cost__${id}`))
+    const laborHours = toNumberOrNull(formData.get(`labor_hours__${id}`))
+    const laborCost = laborHours !== null ? laborHours * laborRate : null
     const vendorEstimatedCost = toNumberOrNull(formData.get(`vendor_estimated_cost__${id}`))
     const tenantStatusRaw = formData.get(`tenant_status__${id}`)
     const tenantStatus = tenantStatusRaw ? String(tenantStatusRaw) : null
@@ -28,6 +32,7 @@ export async function bulkUpdateLineItems(formData: FormData) {
       update line_items
       set
         materials_cost = ${materialsCost},
+        labor_hours = ${laborHours},
         labor_cost = ${laborCost},
         vendor_estimated_cost = ${vendorEstimatedCost},
         tenant_status = ${tenantStatus},
