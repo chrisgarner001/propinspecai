@@ -4,6 +4,7 @@ import Link from 'next/link'
 const NAV_ITEMS = [
   { href: '/', label: 'Inspections' },
   { href: '/cost-book', label: 'Cost Book' },
+  { href: '/setup', label: 'Set Up' },
 ]
 
 function BrandLockup({ compact = false }: { compact?: boolean }) {

@@ -23,6 +23,9 @@ type LineItem = {
   condition: string
   observed_evidence: string | null
   recommended_action: string | null
+  tenant_status: string | null
+  materials_cost: string | null
+  labor_cost: string | null
 }
 
 const CONDITION_DISPLAY: Record<string, string> = {
@@ -47,11 +50,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   }
 
   const lineItems = (await sql`
-    select room_area, item, condition, observed_evidence, recommended_action
+    select room_area, item, condition, observed_evidence, recommended_action,
+      tenant_status, materials_cost, labor_cost
     from line_items
     where inspection_id = ${id}
     order by room_area, created_at
   `) as unknown as LineItem[]
+
+  const chargedItems = lineItems.filter((li) => li.tenant_status === 'tenant_charge')
 
   const roomGroups = new Map<string, LineItem[]>()
   for (const li of lineItems) {
@@ -184,6 +190,74 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       drawItemRow(li)
     }
     doc.y += 8
+  }
+
+  // --- Itemized Charges to Tenant ---
+  // Only rows the reviewer marked "Charge" (tenant_status = 'tenant_charge'),
+  // with their Materials/Labor dollar amounts -- the deposit-disposition
+  // itemization, distinct from the full condition checklist above.
+  doc.y += 10
+  ensureSpace(30)
+  doc.font('Helvetica-Bold').fontSize(12).text('Itemized Charges to Tenant', colItem, doc.y)
+  doc.y += 18
+
+  if (chargedItems.length === 0) {
+    doc.font('Helvetica-Oblique').fontSize(9).text('No items charged to tenant.', colItem, doc.y)
+    doc.y += 16
+  } else {
+    const chargeColItem = PAGE_MARGIN
+    const chargeColRoom = PAGE_MARGIN + 200
+    const chargeColMaterials = PAGE_MARGIN + 320
+    const chargeColLabor = PAGE_MARGIN + 400
+    const chargeColTotal = PAGE_MARGIN + 470
+
+    function drawChargeHeader() {
+      ensureSpace(20)
+      const headerY = doc.y
+      doc.font('Helvetica-Bold').fontSize(9)
+      doc.text('Item', chargeColItem, headerY)
+      doc.text('Room/Area', chargeColRoom, headerY)
+      doc.text('Materials', chargeColMaterials, headerY)
+      doc.text('Labor', chargeColLabor, headerY)
+      doc.text('Total', chargeColTotal, headerY)
+      doc.y = headerY + 14
+      doc.moveTo(PAGE_MARGIN, doc.y).lineTo(PAGE_WIDTH - PAGE_MARGIN, doc.y).lineWidth(1.2).stroke()
+      doc.y += 4
+    }
+
+    drawChargeHeader()
+
+    let grandTotal = 0
+    for (const li of chargedItems) {
+      const materials = Number(li.materials_cost ?? 0)
+      const labor = Number(li.labor_cost ?? 0)
+      const total = materials + labor
+      grandTotal += total
+
+      ensureSpace(16)
+      if (doc.y === PAGE_MARGIN) drawChargeHeader()
+      const rowY = doc.y
+      doc.font('Helvetica').fontSize(9)
+      doc.text(li.item, chargeColItem, rowY, { width: chargeColRoom - chargeColItem - 6 })
+      doc.text(li.room_area, chargeColRoom, rowY, { width: chargeColMaterials - chargeColRoom - 6 })
+      doc.text(li.materials_cost !== null ? `$${materials.toFixed(2)}` : '—', chargeColMaterials, rowY)
+      doc.text(li.labor_cost !== null ? `$${labor.toFixed(2)}` : '—', chargeColLabor, rowY)
+      doc.text(`$${total.toFixed(2)}`, chargeColTotal, rowY)
+      doc.y = rowY + 16
+      doc
+        .moveTo(PAGE_MARGIN, doc.y - 3)
+        .lineTo(PAGE_WIDTH - PAGE_MARGIN, doc.y - 3)
+        .lineWidth(0.5)
+        .strokeColor('#cccccc')
+        .stroke()
+        .strokeColor('#000000')
+    }
+
+    ensureSpace(20)
+    doc.font('Helvetica-Bold').fontSize(10)
+    doc.text('Total Charged to Tenant:', chargeColLabor - 80, doc.y)
+    doc.text(`$${grandTotal.toFixed(2)}`, chargeColTotal, doc.y)
+    doc.y += 20
   }
 
   ensureSpace(160)

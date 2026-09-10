@@ -93,3 +93,21 @@ export async function markUnderReview(formData: FormData) {
   revalidatePath(`/inspections/${inspectionId}`)
   revalidatePath('/')
 }
+
+export async function updateSettings(formData: FormData) {
+  const sql = getSql()
+  const gpmLaborCharge = toNumberOrNull(formData.get('gpm_labor_charge')) ?? 0
+  const materialMarkupPct = toNumberOrNull(formData.get('material_markup_pct')) ?? 0
+  const vendorMarkupPct = toNumberOrNull(formData.get('vendor_markup_pct')) ?? 0
+
+  await sql`
+    update settings
+    set
+      gpm_labor_charge = ${gpmLaborCharge},
+      material_markup_pct = ${materialMarkupPct},
+      vendor_markup_pct = ${vendorMarkupPct}
+    where id = true
+  `
+
+  revalidatePath('/setup')
+}

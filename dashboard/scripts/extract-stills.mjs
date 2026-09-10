@@ -1,6 +1,8 @@
 // Extracts one still frame per line item from its source video, at the
-// midpoint of source_timestamp, using ffmpeg. Writes to public/stills/<id>.jpg
-// and sets line_items.still_image_file accordingly.
+// midpoint of source_timestamp, using ffmpeg, then uploads it to the public
+// "inspection-stills" Supabase Storage bucket and sets
+// line_items.still_image_file to its public URL -- works identically in
+// local dev and on Vercel since it's a real external URL either way.
 //
 // Video files live in a per-job folder at the repo root named "<job_number>
 // <inspector> <date>" (matches the existing "121939 Chuck 9-8-26" convention
@@ -13,12 +15,15 @@ import { promisify } from 'node:util'
 import { readFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { getSupabaseAdmin, ensureStillsBucket, STILLS_BUCKET } from './lib/supabase-admin.mjs'
 
 const execFileAsync = promisify(execFile)
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = join(__dirname, '../..')
 const dashboardRoot = join(__dirname, '..')
+// Local copy kept for convenience (offline viewing, debugging) -- gitignored,
+// not the source of truth for the app. The DB stores the Storage public URL.
 const stillsDir = join(dashboardRoot, 'public', 'stills')
 mkdirSync(stillsDir, { recursive: true })
 
@@ -27,6 +32,9 @@ const envLine = readFileSync(join(dashboardRoot, '.env.local'), 'utf-8')
   .find((l) => l.startsWith('DATABASE_URL='))
 const url = envLine.slice('DATABASE_URL='.length).trim()
 const sql = postgres(url, { ssl: 'require' })
+
+const supabase = getSupabaseAdmin()
+await ensureStillsBucket(supabase)
 
 function parseTimestamp(raw) {
   // "0:01-0:40" -> midpoint seconds. "Clip 2, 0:20-0:29" -> strip the "Clip N," prefix first.
@@ -94,12 +102,20 @@ for (const row of rows) {
       '-q:v', '3',
       outFile,
     ])
-    const publicPath = `/stills/${row.id}.jpg`
-    await sql`update line_items set still_image_file = ${publicPath} where id = ${row.id}`
-    console.log(`  extracted ${row.id} from ${row.source_video_file} @ ${seconds.toFixed(1)}s`)
+
+    const storagePath = `${row.id}.jpg`
+    const fileBuffer = readFileSync(outFile)
+    const { error: uploadError } = await supabase.storage
+      .from(STILLS_BUCKET)
+      .upload(storagePath, fileBuffer, { contentType: 'image/jpeg', upsert: true })
+    if (uploadError) throw uploadError
+
+    const { data: publicUrlData } = supabase.storage.from(STILLS_BUCKET).getPublicUrl(storagePath)
+    await sql`update line_items set still_image_file = ${publicUrlData.publicUrl} where id = ${row.id}`
+    console.log(`  extracted ${row.id} from ${row.source_video_file} @ ${seconds.toFixed(1)}s -> ${publicUrlData.publicUrl}`)
     extracted++
   } catch (err) {
-    console.log(`  ffmpeg failed for ${row.id}: ${err.message}`)
+    console.log(`  failed for ${row.id}: ${err.message}`)
     skipped++
   }
 }
