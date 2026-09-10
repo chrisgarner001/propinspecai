@@ -2,6 +2,7 @@
 
 import { getSql } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 
 function toNumberOrNull(value: FormDataEntryValue | null): number | null {
   if (value === null || value === '') return null
@@ -9,26 +10,31 @@ function toNumberOrNull(value: FormDataEntryValue | null): number | null {
   return Number.isNaN(n) ? null : n
 }
 
-export async function updateLineItem(formData: FormData) {
+export async function bulkUpdateLineItems(formData: FormData) {
   const sql = getSql()
-  const id = String(formData.get('id'))
   const inspectionId = String(formData.get('inspection_id'))
+  const ids = formData.getAll('ids').map(String)
 
-  const materialsCost = toNumberOrNull(formData.get('materials_cost'))
-  const laborCost = toNumberOrNull(formData.get('labor_cost'))
-  const vendorEstimatedCost = toNumberOrNull(formData.get('vendor_estimated_cost'))
-  const tenantStatusRaw = formData.get('tenant_status')
-  const tenantStatus = tenantStatusRaw ? String(tenantStatusRaw) : null
+  for (const id of ids) {
+    const materialsCost = toNumberOrNull(formData.get(`materials_cost__${id}`))
+    const laborCost = toNumberOrNull(formData.get(`labor_cost__${id}`))
+    const vendorEstimatedCost = toNumberOrNull(formData.get(`vendor_estimated_cost__${id}`))
+    const tenantStatusRaw = formData.get(`tenant_status__${id}`)
+    const tenantStatus = tenantStatusRaw ? String(tenantStatusRaw) : null
+    const vendorIdRaw = formData.get(`vendor_id__${id}`)
+    const vendorId = vendorIdRaw ? String(vendorIdRaw) : null
 
-  await sql`
-    update line_items
-    set
-      materials_cost = ${materialsCost},
-      labor_cost = ${laborCost},
-      vendor_estimated_cost = ${vendorEstimatedCost},
-      tenant_status = ${tenantStatus}
-    where id = ${id}
-  `
+    await sql`
+      update line_items
+      set
+        materials_cost = ${materialsCost},
+        labor_cost = ${laborCost},
+        vendor_estimated_cost = ${vendorEstimatedCost},
+        tenant_status = ${tenantStatus},
+        vendor_id = ${vendorId}
+      where id = ${id}
+    `
+  }
 
   revalidatePath(`/inspections/${inspectionId}`)
 }
@@ -49,4 +55,41 @@ export async function addLineItem(formData: FormData) {
   `
 
   revalidatePath(`/inspections/${inspectionId}`)
+}
+
+export async function createInspection(formData: FormData) {
+  const sql = getSql()
+  const jobNumber = String(formData.get('job_number'))
+  const propertyAddress = String(formData.get('property_address'))
+  const inspectionDate = String(formData.get('inspection_date'))
+  const inspectorName = String(formData.get('inspector_name'))
+
+  const [row] = await sql`
+    insert into inspections (job_number, property_address, inspection_date, inspector_name)
+    values (${jobNumber}, ${propertyAddress}, ${inspectionDate}, ${inspectorName})
+    returning id
+  `
+
+  revalidatePath('/')
+  redirect(`/inspections/${row.id}`)
+}
+
+export async function markExported(formData: FormData) {
+  const sql = getSql()
+  const inspectionId = String(formData.get('inspection_id'))
+
+  await sql`update inspections set status = 'exported' where id = ${inspectionId}`
+
+  revalidatePath(`/inspections/${inspectionId}`)
+  revalidatePath('/')
+}
+
+export async function markUnderReview(formData: FormData) {
+  const sql = getSql()
+  const inspectionId = String(formData.get('inspection_id'))
+
+  await sql`update inspections set status = 'pending_review' where id = ${inspectionId}`
+
+  revalidatePath(`/inspections/${inspectionId}`)
+  revalidatePath('/')
 }
