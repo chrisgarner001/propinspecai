@@ -7,6 +7,7 @@ import VendorSelect from '@/app/components/VendorSelect'
 import EvidenceStill from '@/app/components/EvidenceStill'
 import LaborHoursInput from '@/app/components/LaborHoursInput'
 import TenantChargeCheckboxes from '@/app/components/TenantChargeCheckboxes'
+import VideoPopupLink from '@/app/components/VideoPopupLink'
 
 const CONDITIONS = ['Good', 'Fair', 'Damaged', 'Not Rated']
 const ASSIGNED_TO_OPTIONS = ['GPM Staff', 'Outside Vendor', 'Other']
@@ -30,8 +31,8 @@ type LineItem = {
   vendor_estimated_cost: string | null
   tenant_status: string | null
   is_manual_addition: boolean
-  source_timestamp: string | null
   source_video_file: string | null
+  source_video_drive_file_id: string | null
   still_image_file: string | null
   vendor_id: string | null
 }
@@ -160,17 +161,9 @@ export default async function InspectionPage({
                     className={`${miniField} data-mono text-text-muted`}
                   />
                   <EvidenceStill stillImageFile={li.still_image_file} />
-                  <div className="flex items-center gap-1">
-                    <span className="data-mono text-[11px] text-text-muted whitespace-nowrap">
-                      {li.source_video_file ?? '—'}
-                    </span>
-                    <input
-                      name={`source_timestamp__${li.id}`}
-                      defaultValue={li.source_timestamp ?? ''}
-                      placeholder="0:00-0:00"
-                      className={`${miniField} data-mono text-text-muted`}
-                    />
-                  </div>
+                  {li.source_video_file && (
+                    <VideoPopupLink filename={li.source_video_file} driveFileId={li.source_video_drive_file_id} />
+                  )}
                 </div>
               </div>
               <div role="cell" className="min-w-0">

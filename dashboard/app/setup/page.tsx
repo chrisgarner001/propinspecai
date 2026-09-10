@@ -1,5 +1,5 @@
 import { getSql } from '@/lib/db'
-import { updateSettings } from '@/app/actions'
+import { updateSettings, createVendor } from '@/app/actions'
 import AppShell from '@/app/components/AppShell'
 
 export const dynamic = 'force-dynamic'
@@ -10,6 +10,8 @@ type Settings = {
   vendor_markup_pct: string
 }
 
+type Vendor = { id: string; name: string }
+
 const fieldClass = 'data-mono border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 w-40 bg-surface'
 const labelClass = 'font-medium'
 const helpClass = 'text-[12px] text-text-muted mt-1'
@@ -17,6 +19,7 @@ const helpClass = 'text-[12px] text-text-muted mt-1'
 export default async function SetupPage() {
   const sql = getSql()
   const [settings] = (await sql`select * from settings where id = true`) as unknown as Settings[]
+  const vendors = (await sql`select id, name from vendors order by name`) as unknown as Vendor[]
 
   return (
     <AppShell active="/setup" reviewerName="Jessica Zilka" title="Set Up">
@@ -79,6 +82,38 @@ export default async function SetupPage() {
           Save settings
         </button>
       </form>
+
+      <div className="p-6 max-w-xl border-t border-border">
+        <div className={labelClass}>Vendors</div>
+        <div className={`${helpClass} mb-3`}>Outside vendors available in the Assigned To picker on inspections.</div>
+        {vendors.length > 0 && (
+          <ul className="mb-4 space-y-1">
+            {vendors.map((v) => (
+              <li key={v.id} className="text-[13px] text-text-muted">
+                {v.name}
+              </li>
+            ))}
+          </ul>
+        )}
+        <form action={createVendor} className="flex items-end gap-2">
+          <div className="flex-1">
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1">
+              Vendor Name
+            </label>
+            <input
+              name="name"
+              required
+              className="border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 w-full bg-surface"
+            />
+          </div>
+          <button
+            type="submit"
+            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-2 text-[12px] font-semibold"
+          >
+            Create New Vendor
+          </button>
+        </form>
+      </div>
     </AppShell>
   )
 }

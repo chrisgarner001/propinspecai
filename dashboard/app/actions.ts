@@ -27,8 +27,6 @@ export async function bulkUpdateLineItems(formData: FormData) {
     const recommendedAction = String(formData.get(`recommended_action__${id}`) ?? '')
     const observedEvidenceRaw = formData.get(`observed_evidence__${id}`)
     const observedEvidence = observedEvidenceRaw ? String(observedEvidenceRaw) : null
-    const sourceTimestampRaw = formData.get(`source_timestamp__${id}`)
-    const sourceTimestamp = sourceTimestampRaw ? String(sourceTimestampRaw) : null
     const materialsCost = toNumberOrNull(formData.get(`materials_cost__${id}`))
     const laborHours = toNumberOrNull(formData.get(`labor_hours__${id}`))
     const laborCost = laborHours !== null ? laborHours * laborRate : null
@@ -47,7 +45,6 @@ export async function bulkUpdateLineItems(formData: FormData) {
         assigned_to = ${assignedTo},
         recommended_action = ${recommendedAction},
         observed_evidence = ${observedEvidence},
-        source_timestamp = ${sourceTimestamp},
         materials_cost = ${materialsCost},
         labor_hours = ${laborHours},
         labor_cost = ${laborCost},
@@ -136,6 +133,16 @@ export async function updateInspectionStatus(formData: FormData) {
 
   revalidatePath(`/inspections/${inspectionId}`)
   revalidatePath('/')
+}
+
+export async function createVendor(formData: FormData) {
+  const sql = getSql()
+  const name = String(formData.get('name') ?? '').trim()
+  if (!name) return
+
+  await sql`insert into vendors (name) values (${name}) on conflict (name) do nothing`
+
+  revalidatePath('/setup')
 }
 
 export async function updateSettings(formData: FormData) {
