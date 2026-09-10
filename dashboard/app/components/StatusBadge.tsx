@@ -1,4 +1,4 @@
-const STATUS_STYLES: Record<string, { label: string; bg: string; text: string }> = {
+export const STATUS_STYLES: Record<string, { label: string; bg: string; text: string }> = {
   pending_review: { label: 'Pending review', bg: 'bg-accent-bg', text: 'text-accent-ink' },
   reviewed: { label: 'Reviewed', bg: 'bg-success-bg', text: 'text-success' },
   exported: { label: 'Exported', bg: 'bg-neutral-bg', text: 'text-neutral' },

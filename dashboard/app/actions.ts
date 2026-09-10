@@ -19,6 +19,16 @@ export async function bulkUpdateLineItems(formData: FormData) {
   const laborRate = Number(settings?.gpm_labor_charge ?? 0)
 
   for (const id of ids) {
+    const roomArea = String(formData.get(`room_area__${id}`) ?? '')
+    const item = String(formData.get(`item__${id}`) ?? '')
+    const condition = String(formData.get(`condition__${id}`) ?? '')
+    const assignedToRaw = formData.get(`assigned_to__${id}`)
+    const assignedTo = assignedToRaw ? String(assignedToRaw) : null
+    const recommendedAction = String(formData.get(`recommended_action__${id}`) ?? '')
+    const observedEvidenceRaw = formData.get(`observed_evidence__${id}`)
+    const observedEvidence = observedEvidenceRaw ? String(observedEvidenceRaw) : null
+    const sourceTimestampRaw = formData.get(`source_timestamp__${id}`)
+    const sourceTimestamp = sourceTimestampRaw ? String(sourceTimestampRaw) : null
     const materialsCost = toNumberOrNull(formData.get(`materials_cost__${id}`))
     const laborHours = toNumberOrNull(formData.get(`labor_hours__${id}`))
     const laborCost = laborHours !== null ? laborHours * laborRate : null
@@ -31,6 +41,13 @@ export async function bulkUpdateLineItems(formData: FormData) {
     await sql`
       update line_items
       set
+        room_area = ${roomArea},
+        item = ${item},
+        condition = ${condition},
+        assigned_to = ${assignedTo},
+        recommended_action = ${recommendedAction},
+        observed_evidence = ${observedEvidence},
+        source_timestamp = ${sourceTimestamp},
         materials_cost = ${materialsCost},
         labor_hours = ${laborHours},
         labor_cost = ${laborCost},
@@ -79,21 +96,12 @@ export async function createInspection(formData: FormData) {
   redirect(`/inspections/${row.id}`)
 }
 
-export async function markExported(formData: FormData) {
+export async function updateInspectionStatus(formData: FormData) {
   const sql = getSql()
   const inspectionId = String(formData.get('inspection_id'))
+  const status = String(formData.get('status'))
 
-  await sql`update inspections set status = 'exported' where id = ${inspectionId}`
-
-  revalidatePath(`/inspections/${inspectionId}`)
-  revalidatePath('/')
-}
-
-export async function markUnderReview(formData: FormData) {
-  const sql = getSql()
-  const inspectionId = String(formData.get('inspection_id'))
-
-  await sql`update inspections set status = 'pending_review' where id = ${inspectionId}`
+  await sql`update inspections set status = ${status} where id = ${inspectionId}`
 
   revalidatePath(`/inspections/${inspectionId}`)
   revalidatePath('/')

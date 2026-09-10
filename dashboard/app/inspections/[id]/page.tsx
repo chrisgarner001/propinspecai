@@ -1,12 +1,17 @@
 import { getSql } from '@/lib/db'
-import { bulkUpdateLineItems, addLineItem, markExported, markUnderReview } from '@/app/actions'
+import { bulkUpdateLineItems, addLineItem } from '@/app/actions'
 import { notFound } from 'next/navigation'
 import AppShell from '@/app/components/AppShell'
-import StatusBadge from '@/app/components/StatusBadge'
-import ConditionBadge from '@/app/components/ConditionBadge'
+import StatusSelect from '@/app/components/StatusSelect'
 import VendorSelect from '@/app/components/VendorSelect'
 import EvidenceStill from '@/app/components/EvidenceStill'
 import LaborHoursInput from '@/app/components/LaborHoursInput'
+
+const CONDITIONS = ['Good', 'Fair', 'Damaged', 'Not Rated']
+const ASSIGNED_TO_OPTIONS = ['GPM Staff', 'Outside Vendor', 'Other']
+
+const miniField =
+  'text-[12px] border border-border rounded-[var(--radius-sm)] px-1.5 py-1 w-full bg-surface'
 
 type LineItem = {
   id: string
@@ -75,27 +80,6 @@ export default async function InspectionPage({
         >
           Create Move Out Report
         </a>
-        {inspection.status === 'exported' ? (
-          <form action={markUnderReview}>
-            <input type="hidden" name="inspection_id" value={id} />
-            <button
-              type="submit"
-              className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
-            >
-              Under Review
-            </button>
-          </form>
-        ) : (
-          <form action={markExported}>
-            <input type="hidden" name="inspection_id" value={id} />
-            <button
-              type="submit"
-              className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
-            >
-              Mark Exported
-            </button>
-          </form>
-        )}
       </div>
 
       <div className="flex items-center justify-between px-6 py-4 border-b border-border">
@@ -105,7 +89,7 @@ export default async function InspectionPage({
             {new Date(inspection.inspection_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}
           </span>
         </div>
-        <StatusBadge status={inspection.status} />
+        <StatusSelect inspectionId={id} status={inspection.status} />
       </div>
 
       <form action={bulkUpdateLineItems}>
@@ -134,41 +118,79 @@ export default async function InspectionPage({
               className={`grid ${ROW_COLS} gap-2 items-center px-3 py-3 border-b border-border`}
             >
               <input type="hidden" name="ids" value={li.id} />
-              <div role="cell" className="min-w-0">
-                <div className="text-[10px] uppercase tracking-wide text-text-muted">{li.room_area}</div>
-                <div className="font-semibold">
-                  {li.item}
+              <div role="cell" className="min-w-0 space-y-1">
+                <input
+                  name={`room_area__${li.id}`}
+                  defaultValue={li.room_area}
+                  placeholder="Room/Area"
+                  className={`${miniField} text-[10px] uppercase tracking-wide text-text-muted`}
+                />
+                <div className="flex items-center gap-1.5">
+                  <input
+                    name={`item__${li.id}`}
+                    defaultValue={li.item}
+                    placeholder="Item"
+                    className={`${miniField} font-semibold`}
+                  />
                   {li.is_manual_addition && (
-                    <span className="ml-1.5 text-[11px] font-normal text-accent">(added)</span>
+                    <span className="text-[11px] font-normal text-accent whitespace-nowrap">(added)</span>
                   )}
                 </div>
-                {li.recommended_action && (
-                  <div className="text-[12px] text-text-muted">{li.recommended_action}</div>
-                )}
-                {(li.observed_evidence || li.source_timestamp || li.source_video_file || li.still_image_file) && (
-                  <div className="mt-1 border-l-2 border-border pl-2 space-y-0.5">
-                    {li.observed_evidence && (
-                      <div className="data-mono text-[11px] text-text-muted">{li.observed_evidence}</div>
-                    )}
-                    <EvidenceStill stillImageFile={li.still_image_file} />
-                    {(li.source_video_file || li.source_timestamp) && (
-                      <div className="data-mono text-[11px] text-text-muted">
-                        {li.source_video_file}
-                        {li.source_video_file && li.source_timestamp ? ' — ' : ''}
-                        {li.source_timestamp}
-                      </div>
-                    )}
+                <input
+                  name={`recommended_action__${li.id}`}
+                  defaultValue={li.recommended_action ?? ''}
+                  placeholder="Recommended action"
+                  className={`${miniField} text-text-muted`}
+                />
+                <div className="border-l-2 border-border pl-2 space-y-1">
+                  <input
+                    name={`observed_evidence__${li.id}`}
+                    defaultValue={li.observed_evidence ?? ''}
+                    placeholder="Observed evidence"
+                    className={`${miniField} data-mono text-text-muted`}
+                  />
+                  <EvidenceStill stillImageFile={li.still_image_file} />
+                  <div className="flex items-center gap-1">
+                    <span className="data-mono text-[11px] text-text-muted whitespace-nowrap">
+                      {li.source_video_file ?? '—'}
+                    </span>
+                    <input
+                      name={`source_timestamp__${li.id}`}
+                      defaultValue={li.source_timestamp ?? ''}
+                      placeholder="0:00-0:00"
+                      className={`${miniField} data-mono text-text-muted`}
+                    />
                   </div>
-                )}
+                </div>
               </div>
               <div role="cell" className="min-w-0">
-                <ConditionBadge condition={li.condition} />
+                <select
+                  name={`condition__${li.id}`}
+                  defaultValue={li.condition}
+                  className={miniField}
+                >
+                  {CONDITIONS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <div role="cell" className="min-w-0">
-                {li.assigned_to === 'Outside Vendor' ? (
+              <div role="cell" className="min-w-0 space-y-1">
+                <select
+                  name={`assigned_to__${li.id}`}
+                  defaultValue={li.assigned_to ?? ''}
+                  className={miniField}
+                >
+                  <option value="">—</option>
+                  {ASSIGNED_TO_OPTIONS.map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+                {li.assigned_to === 'Outside Vendor' && (
                   <VendorSelect name={`vendor_id__${li.id}`} vendors={vendors} defaultValue={li.vendor_id} />
-                ) : (
-                  <span className="text-text-muted">{li.assigned_to ?? '—'}</span>
                 )}
               </div>
               <input
@@ -282,8 +304,11 @@ export default async function InspectionPage({
               className="border border-border rounded-[var(--radius-sm)] px-2 py-1.5 w-full bg-surface"
             >
               <option value="">—</option>
-              <option value="GPM Staff">GPM Staff</option>
-              <option value="Outside Vendor">Outside Vendor</option>
+              {ASSIGNED_TO_OPTIONS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
             </select>
           </div>
           <div className="col-span-2">
