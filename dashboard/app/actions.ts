@@ -36,8 +36,8 @@ export async function bulkUpdateLineItems(formData: FormData) {
     const laborHours = toNumberOrNull(formData.get(`labor_hours__${id}`))
     const laborCost = laborHours !== null ? laborHours * laborRate : null
     const vendorEstimatedCost = toNumberOrNull(formData.get(`vendor_estimated_cost__${id}`))
-    const tenantStatusRaw = formData.get(`tenant_status__${id}`)
-    const tenantStatus = tenantStatusRaw ? String(tenantStatusRaw) : null
+    const tenantCharge = formData.get(`tenant_charge__${id}`) !== null
+    const tenantApproved = formData.get(`tenant_approved__${id}`) !== null
     const vendorIdRaw = formData.get(`vendor_id__${id}`)
     const vendorId = vendorIdRaw ? String(vendorIdRaw) : null
 
@@ -54,7 +54,8 @@ export async function bulkUpdateLineItems(formData: FormData) {
         labor_hours = ${laborHours},
         labor_cost = ${laborCost},
         vendor_estimated_cost = ${vendorEstimatedCost},
-        tenant_status = ${tenantStatus},
+        tenant_charge = ${tenantCharge},
+        tenant_approved = ${tenantApproved},
         vendor_id = ${vendorId}
       where id = ${id}
     `
@@ -77,7 +78,7 @@ export async function duplicateLineItem(id: string, inspectionId: string, _formD
     insert into line_items (
       inspection_id, room_area, item, condition, observed_evidence, assigned_to,
       trade_category, recommended_action, priority, materials_cost, labor_hours,
-      labor_cost, vendor_estimated_cost, tenant_status, is_manual_addition,
+      labor_cost, vendor_estimated_cost, tenant_charge, tenant_approved, is_manual_addition,
       source_timestamp, source_video_file, still_image_file, vendor_id, created_at
     )
     values (
@@ -85,7 +86,7 @@ export async function duplicateLineItem(id: string, inspectionId: string, _formD
       ${original.observed_evidence}, ${original.assigned_to}, ${original.trade_category},
       ${original.recommended_action}, ${original.priority}, ${original.materials_cost},
       ${original.labor_hours}, ${original.labor_cost}, ${original.vendor_estimated_cost},
-      ${original.tenant_status}, true,
+      ${original.tenant_charge}, ${original.tenant_approved}, true,
       ${original.source_timestamp}, ${original.source_video_file}, ${original.still_image_file},
       ${original.vendor_id}, ${original.created_at}::timestamptz + interval '1 millisecond'
     )

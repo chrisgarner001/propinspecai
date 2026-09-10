@@ -23,7 +23,7 @@ type LineItem = {
   condition: string
   observed_evidence: string | null
   recommended_action: string | null
-  tenant_status: string | null
+  tenant_charge: boolean
   materials_cost: string | null
   labor_hours: string | null
   labor_cost: string | null
@@ -52,13 +52,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const lineItems = (await sql`
     select room_area, item, condition, observed_evidence, recommended_action,
-      tenant_status, materials_cost, labor_hours, labor_cost
+      tenant_charge, materials_cost, labor_hours, labor_cost
     from line_items
     where inspection_id = ${id}
     order by room_area, created_at
   `) as unknown as LineItem[]
 
-  const chargedItems = lineItems.filter((li) => li.tenant_status === 'tenant_charge')
+  const chargedItems = lineItems.filter((li) => li.tenant_charge)
 
   const roomGroups = new Map<string, LineItem[]>()
   for (const li of lineItems) {
@@ -194,7 +194,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   }
 
   // --- Itemized Charges to Tenant ---
-  // Only rows the reviewer marked "Charge" (tenant_status = 'tenant_charge'),
+  // Only rows the reviewer marked "Charge" (tenant_charge = true),
   // with their Materials/Labor dollar amounts -- the deposit-disposition
   // itemization, distinct from the full condition checklist above.
   doc.y += 10

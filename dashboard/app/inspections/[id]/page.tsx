@@ -31,7 +31,8 @@ type LineItem = {
   labor_hours: string | null
   labor_cost: string | null
   vendor_estimated_cost: string | null
-  tenant_status: string | null
+  tenant_charge: boolean
+  tenant_approved: boolean
   is_manual_addition: boolean
   source_video_file: string | null
   source_video_drive_file_id: string | null
@@ -236,7 +237,7 @@ export default async function InspectionPage({
                 laborRate={laborRate}
                 vendorEstimatedCost={li.vendor_estimated_cost}
               />
-              <TenantChargeCheckboxes name={`tenant_status__${li.id}`} defaultValue={li.tenant_status} />
+              <TenantChargeCheckboxes id={li.id} tenantCharge={li.tenant_charge} tenantApproved={li.tenant_approved} />
             </div>
           ))}
         </div>
