@@ -113,15 +113,32 @@ export async function createInspection(formData: FormData) {
   const propertyAddress = String(formData.get('property_address'))
   const inspectionDate = String(formData.get('inspection_date'))
   const inspectorName = String(formData.get('inspector_name'))
+  const sourceVideoDriveFolderUrl = String(formData.get('source_video_drive_folder_url') || '') || null
+  const specialInstructions = String(formData.get('special_instructions') || '') || null
+  const moveInReportDriveUrl = String(formData.get('move_in_report_drive_url') || '') || null
 
   const [row] = await sql`
-    insert into inspections (job_number, property_address, inspection_date, inspector_name)
-    values (${jobNumber}, ${propertyAddress}, ${inspectionDate}, ${inspectorName})
+    insert into inspections (
+      job_number, property_address, inspection_date, inspector_name,
+      source_video_drive_folder_url, special_instructions, move_in_report_drive_url
+    )
+    values (
+      ${jobNumber}, ${propertyAddress}, ${inspectionDate}, ${inspectorName},
+      ${sourceVideoDriveFolderUrl}, ${specialInstructions}, ${moveInReportDriveUrl}
+    )
     returning id
   `
 
   revalidatePath('/')
   redirect(`/inspections/${row.id}`)
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, id) call site; formAction always passes the triggering form's FormData last
+export async function deleteInspection(id: string, _formData: FormData) {
+  const sql = getSql()
+  await sql`delete from inspections where id = ${id}`
+  revalidatePath('/')
+  redirect('/')
 }
 
 export async function updateInspectionStatus(formData: FormData) {

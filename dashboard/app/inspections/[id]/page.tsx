@@ -1,5 +1,5 @@
 import { getSql } from '@/lib/db'
-import { bulkUpdateLineItems, addLineItem, duplicateLineItem } from '@/app/actions'
+import { bulkUpdateLineItems, addLineItem, duplicateLineItem, deleteInspection } from '@/app/actions'
 import { notFound } from 'next/navigation'
 import AppShell from '@/app/components/AppShell'
 import StatusSelect from '@/app/components/StatusSelect'
@@ -7,6 +7,7 @@ import EvidenceStill from '@/app/components/EvidenceStill'
 import LineItemAssignment from '@/app/components/LineItemAssignment'
 import TenantChargeCheckboxes from '@/app/components/TenantChargeCheckboxes'
 import VideoPopupLink from '@/app/components/VideoPopupLink'
+import DeleteInspectionButton from '@/app/components/DeleteInspectionButton'
 
 const CONDITIONS = ['Good', 'Fair', 'Damaged', 'Not Rated']
 const ASSIGNED_TO_OPTIONS = ['GPM Staff', 'Outside Vendor', 'Other']
@@ -68,21 +69,24 @@ export default async function InspectionPage({
 
   return (
     <AppShell active="/" reviewerName="Jessica Zilka" title={inspection.property_address} wide>
-      <div className="flex items-center justify-end gap-2 px-6 py-3 border-b border-border bg-surface-alt">
-        <a
-          href={`/inspections/${id}/turn-scope`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
-        >
-          Create Turn Scope
-        </a>
-        <a
-          href={`/inspections/${id}/move-out-report`}
-          className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
-        >
-          Create Move Out Report
-        </a>
+      <div className="flex items-center justify-between gap-2 px-6 py-3 border-b border-border bg-surface-alt">
+        <DeleteInspectionButton action={deleteInspection.bind(null, id)} label="Delete inspection" />
+        <div className="flex items-center gap-2">
+          <a
+            href={`/inspections/${id}/turn-scope`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
+          >
+            Create Turn Scope
+          </a>
+          <a
+            href={`/inspections/${id}/move-out-report`}
+            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
+          >
+            Create Move Out Report
+          </a>
+        </div>
       </div>
 
       <div className="flex items-center justify-between px-6 py-4 border-b border-border">
@@ -94,6 +98,41 @@ export default async function InspectionPage({
         </div>
         <StatusSelect inspectionId={id} status={inspection.status} />
       </div>
+
+      {(inspection.source_video_drive_folder_url ||
+        inspection.move_in_report_drive_url ||
+        inspection.special_instructions) && (
+        <div className="px-6 py-3 border-b border-border bg-surface-alt space-y-2">
+          <div className="flex flex-wrap gap-x-6 gap-y-1">
+            {inspection.source_video_drive_folder_url && (
+              <a
+                href={inspection.source_video_drive_folder_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[12px] font-semibold text-accent underline decoration-accent/40 hover:text-accent-hover"
+              >
+                Source videos (Drive) ↗
+              </a>
+            )}
+            {inspection.move_in_report_drive_url && (
+              <a
+                href={inspection.move_in_report_drive_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[12px] font-semibold text-accent underline decoration-accent/40 hover:text-accent-hover"
+              >
+                Move-in report (Drive) ↗
+              </a>
+            )}
+          </div>
+          {inspection.special_instructions && (
+            <div className="text-[13px] leading-relaxed">
+              <span className="font-semibold">Special instructions: </span>
+              {inspection.special_instructions}
+            </div>
+          )}
+        </div>
+      )}
 
       <form action={bulkUpdateLineItems}>
         <input type="hidden" name="inspection_id" value={id} />

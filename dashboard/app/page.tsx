@@ -2,6 +2,8 @@ import { getSql } from '@/lib/db'
 import Link from 'next/link'
 import AppShell from './components/AppShell'
 import StatusBadge from './components/StatusBadge'
+import DeleteInspectionButton from './components/DeleteInspectionButton'
+import { deleteInspection } from './actions'
 
 // This lists live database state for an internal review tool — never serve a
 // stale build-time snapshot.
@@ -43,6 +45,9 @@ function InspectionTable({ inspections }: { inspections: InspectionRow[] }) {
             </td>
             <td className="px-6 py-3">
               <StatusBadge status={i.status} />
+            </td>
+            <td className="px-6 py-3 text-right">
+              <DeleteInspectionButton action={deleteInspection.bind(null, i.id)} />
             </td>
           </tr>
         ))}
