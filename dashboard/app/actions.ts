@@ -131,6 +131,57 @@ export async function updateQuoteSheetItems(formData: FormData) {
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
 }
 
+// Groups Quote Sheet line items into Work Order batches by their CURRENT
+// Assigned To / Vendor: one shared batch for every "GPM Staff" item, and one
+// batch per distinct vendor for every "Outside Vendor" item that already has
+// a vendor picked. Items assigned to "Other", left unassigned, or "Outside
+// Vendor" with no vendor chosen yet are left unbatched -- there's no
+// sensible single batch to put them in.
+//
+// Re-runnable: clears this inspection's existing batches first and
+// regroups from scratch, so it reflects the latest assignments rather than
+// only the first time it's run (assignments commonly change after an
+// initial pass).
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, inspectionId) call site; formAction always passes the triggering form's FormData last
+export async function createWorkOrderBatches(inspectionId: string, _formData: FormData) {
+  const sql = getSql()
+
+  await sql`
+    update line_items set work_order_id = null
+    where inspection_id = ${inspectionId} and work_order_id is not null
+  `
+  await sql`delete from work_orders where inspection_id = ${inspectionId}`
+
+  const items = await sql`
+    select id, assigned_to, vendor_id from line_items
+    where inspection_id = ${inspectionId} and tenant_approved = false
+  `
+
+  const gpmItemIds = items.filter((li) => li.assigned_to === 'GPM Staff').map((li) => li.id)
+  if (gpmItemIds.length > 0) {
+    const [wo] = await sql`insert into work_orders (inspection_id, type) values (${inspectionId}, 'gpm') returning id`
+    await sql`update line_items set work_order_id = ${wo.id} where id in ${sql(gpmItemIds)}`
+  }
+
+  const vendorIds = [
+    ...new Set(
+      items.filter((li) => li.assigned_to === 'Outside Vendor' && li.vendor_id !== null).map((li) => li.vendor_id as string),
+    ),
+  ]
+  for (const vendorId of vendorIds) {
+    const vendorItemIds = items
+      .filter((li) => li.assigned_to === 'Outside Vendor' && li.vendor_id === vendorId)
+      .map((li) => li.id)
+    const [wo] = await sql`
+      insert into work_orders (inspection_id, type, vendor_id) values (${inspectionId}, 'vendor', ${vendorId})
+      returning id
+    `
+    await sql`update line_items set work_order_id = ${wo.id} where id in ${sql(vendorItemIds)}`
+  }
+
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, id, inspectionId) call site; formAction always passes the triggering form's FormData last
 export async function duplicateLineItem(id: string, inspectionId: string, _formData: FormData) {
   const sql = getSql()
