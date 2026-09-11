@@ -22,6 +22,10 @@ export const maxDuration = 300
 const CONDITIONS = ['Good', 'Fair', 'Damaged', 'Not Rated']
 const ASSIGNED_TO_OPTIONS = ['GPM Staff', 'Outside Vendor', 'Other']
 
+function areaAnchor(roomArea: string) {
+  return `area-${roomArea.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}`
+}
+
 const miniField =
   'text-[12px] border border-border rounded-[var(--radius-sm)] px-1.5 py-1 w-full bg-surface truncate'
 
@@ -75,6 +79,12 @@ export default async function InspectionPage({
 
   const vendors = (await sql`select id, name from vendors order by name`) as unknown as Vendor[]
 
+  const areas = [...new Set(lineItems.map((li) => li.room_area))]
+  const firstRowIdByArea = new Map<string, string>()
+  for (const li of lineItems) {
+    if (!firstRowIdByArea.has(li.room_area)) firstRowIdByArea.set(li.room_area, li.id)
+  }
+
   const inspectionVideos = (await sql`
     select id, drive_file_id, filename, status, error_message, line_items_created
     from inspection_videos where inspection_id = ${id} order by created_at
@@ -100,7 +110,7 @@ export default async function InspectionPage({
             rel="noopener noreferrer"
             className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
           >
-            Create Turn Scope
+            Create Quote Sheet
           </a>
           <a
             href={`/inspections/${id}/move-out-report`}
@@ -160,6 +170,20 @@ export default async function InspectionPage({
         <VideoProcessingPanel inspectionId={id} initialVideos={inspectionVideos} />
       )}
 
+      {areas.length > 0 && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 px-6 py-3 border-b border-border bg-surface-alt">
+          {areas.map((area) => (
+            <a
+              key={area}
+              href={`#${areaAnchor(area)}`}
+              className="text-[12px] font-semibold text-accent underline decoration-accent/40 hover:text-accent-hover"
+            >
+              {area}
+            </a>
+          ))}
+        </div>
+      )}
+
       <form action={bulkUpdateLineItems}>
         <input type="hidden" name="inspection_id" value={id} />
         <div role="table">
@@ -182,8 +206,9 @@ export default async function InspectionPage({
           {lineItems.map((li) => (
             <div
               key={li.id}
+              id={firstRowIdByArea.get(li.room_area) === li.id ? areaAnchor(li.room_area) : undefined}
               role="row"
-              className={`relative grid ${ROW_COLS} gap-2 items-center px-3 pt-3 pb-7 border-b border-border`}
+              className={`relative grid ${ROW_COLS} gap-2 items-center px-3 pt-3 pb-7 border-b border-border scroll-mt-16`}
             >
               <input type="hidden" name="ids" value={li.id} />
               <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1.5">

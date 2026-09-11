@@ -21,6 +21,7 @@ export default function VideoProcessingPanel({
   const [videos, setVideos] = useState<InspectionVideoRow[]>(initialVideos)
   const [running, setRunning] = useState(false)
   const [bannerError, setBannerError] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState(false)
   const router = useRouter()
 
   const total = videos.length
@@ -69,7 +70,19 @@ export default function VideoProcessingPanel({
   return (
     <div className="px-6 py-4 border-b border-border bg-surface-alt space-y-3">
       <div className="flex items-center justify-between">
-        <div className="text-[13px] font-semibold">Video Processing</div>
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          className="flex items-center gap-1.5 text-[13px] font-semibold"
+        >
+          <span className="text-text-muted text-[11px]">{collapsed ? '▶' : '▼'}</span>
+          Video Processing
+          {collapsed && total > 0 && (
+            <span className="font-normal text-text-muted text-[12px]">
+              ({doneCount} of {total} processed{failedCount > 0 ? ` · ${failedCount} failed` : ''})
+            </span>
+          )}
+        </button>
         {notStarted && (
           <button
             type="button"
@@ -94,7 +107,7 @@ export default function VideoProcessingPanel({
 
       {bannerError && <div className="text-[12px] text-error">{bannerError}</div>}
 
-      {total > 0 && (
+      {!collapsed && total > 0 && (
         <>
           <div className="space-y-1">
             <div className="flex items-center justify-between text-[11px] text-text-muted">

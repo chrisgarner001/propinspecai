@@ -5,6 +5,11 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { parseFolderIdFromUrl, listVideosInFolder, downloadDriveFile } from '@/lib/google'
 import { extractLineItemsFromVideo } from '@/lib/gemini'
+import { parseTimestampSeconds, extractFrame, uploadStill } from '@/lib/stills'
+import { writeFile, unlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 
 function toNumberOrNull(value: FormDataEntryValue | null): number | null {
   if (value === null || value === '') return null
@@ -322,17 +327,43 @@ export async function processNextInspectionVideo(inspectionId: string): Promise<
       const buffer = await downloadDriveFile(next.drive_file_id)
       const extracted = await extractLineItemsFromVideo(buffer, next.filename)
 
-      for (const li of extracted) {
-        await sql`
-          insert into line_items (
-            inspection_id, room_area, item, condition, observed_evidence, recommended_action,
-            trade_category, assigned_to, priority, source_timestamp, source_video_file, is_manual_addition
-          )
-          values (
-            ${inspectionId}, ${li.room_area}, ${li.item}, ${li.condition}, ${li.observed_evidence}, ${li.recommended_action},
-            ${li.trade_category}, ${li.assigned_to}, ${li.priority}, ${li.source_timestamp}, ${next.filename}, false
-          )
-        `
+      // Video is written to disk once and reused across every still-frame
+      // extraction below (rather than re-writing the buffer per line item) --
+      // some of these clips are 100s of MB.
+      const videoTempPath = join(tmpdir(), `propinspec-video-${randomUUID()}.mp4`)
+      await writeFile(videoTempPath, buffer)
+
+      try {
+        for (const li of extracted) {
+          const [{ id: lineItemId }] = await sql`
+            insert into line_items (
+              inspection_id, room_area, item, condition, observed_evidence, recommended_action,
+              trade_category, assigned_to, priority, source_timestamp, source_video_file, source_video_drive_file_id, is_manual_addition
+            )
+            values (
+              ${inspectionId}, ${li.room_area}, ${li.item}, ${li.condition}, ${li.observed_evidence}, ${li.recommended_action},
+              ${li.trade_category}, ${li.assigned_to}, ${li.priority}, ${li.source_timestamp}, ${next.filename}, ${next.drive_file_id}, false
+            )
+            returning id
+          `
+
+          // Best-effort: a still is a nice-to-have on top of the line item,
+          // not a requirement -- EvidenceStill already renders a graceful
+          // "No still extracted yet" placeholder, so a failure here should
+          // never take down the line item (or the whole video) with it.
+          const seconds = parseTimestampSeconds(li.source_timestamp)
+          if (seconds !== null) {
+            try {
+              const frame = await extractFrame(videoTempPath, seconds)
+              const url = await uploadStill(frame, `${lineItemId}.jpg`)
+              await sql`update line_items set still_image_file = ${url} where id = ${lineItemId}`
+            } catch (stillErr) {
+              console.error(`Still extraction failed for line item ${lineItemId}:`, (stillErr as Error).message)
+            }
+          }
+        }
+      } finally {
+        await unlink(videoTempPath).catch(() => {})
       }
 
       await sql`

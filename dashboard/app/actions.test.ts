@@ -27,6 +27,16 @@ vi.mock('@/lib/gemini', () => ({
   extractLineItemsFromVideo: (...args: unknown[]) => mockExtractLineItemsFromVideo(...args),
 }))
 
+// Still extraction shells out to a real ffmpeg binary against the video on
+// disk -- irrelevant to the DB state-machine behavior under test, and the
+// fake buffers these tests write aren't valid video, so it's mocked out
+// rather than left to fail (loudly, to stderr) on every run.
+vi.mock('@/lib/stills', () => ({
+  parseTimestampSeconds: () => null,
+  extractFrame: vi.fn(),
+  uploadStill: vi.fn(),
+}))
+
 // Integration tests against the real dev Postgres (DATABASE_URL from
 // .env.local, loaded by vitest.setup.ts) -- matches this project's existing
 // practice of verifying against real data rather than mocking the DB.
