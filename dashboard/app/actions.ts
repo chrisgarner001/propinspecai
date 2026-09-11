@@ -103,6 +103,10 @@ export async function updateQuoteSheetItems(formData: FormData) {
     const vendorEstimatedCost = toNumberOrNull(formData.get(`vendor_estimated_cost__${id}`))
     const quoteStageRaw = formData.get(`quote_stage__${id}`)
     const quoteStage = quoteStageRaw ? String(quoteStageRaw) : null
+    const supplierRaw = formData.get(`supplier__${id}`)
+    const supplier = supplierRaw ? String(supplierRaw) : null
+    const skuRaw = formData.get(`sku__${id}`)
+    const sku = skuRaw ? String(skuRaw) : null
 
     await sql`
       update line_items
@@ -117,7 +121,9 @@ export async function updateQuoteSheetItems(formData: FormData) {
         labor_cost = ${laborCost},
         materials_cost = ${materialsCost},
         vendor_estimated_cost = ${vendorEstimatedCost},
-        quote_stage = ${quoteStage}
+        quote_stage = ${quoteStage},
+        supplier = ${supplier},
+        sku = ${sku}
       where id = ${id}
     `
   }

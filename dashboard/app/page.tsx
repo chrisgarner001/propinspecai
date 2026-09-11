@@ -1,7 +1,7 @@
 import { getSql } from '@/lib/db'
 import Link from 'next/link'
 import AppShell from './components/AppShell'
-import StatusBadge from './components/StatusBadge'
+import StatusBadge, { STATUS_STYLES, STATUS_ORDER } from './components/StatusBadge'
 import DeleteInspectionButton from './components/DeleteInspectionButton'
 import { deleteInspection } from './actions'
 
@@ -18,13 +18,9 @@ type InspectionRow = {
   status: string
 }
 
-const STATUS_GROUPS: { status: string; label: string }[] = [
-  { status: 'under_review', label: 'Under Review' },
-  { status: 'quote_sent', label: 'Quote Sent' },
-  { status: 'approved', label: 'Approved' },
-  { status: 'in_process', label: 'In Process' },
-  { status: 'completed', label: 'Completed' },
-]
+// Grouped in STATUS_ORDER (the same canonical order every status pill uses),
+// not a separately-maintained list here.
+const STATUS_GROUPS = STATUS_ORDER.map((status) => ({ status, label: STATUS_STYLES[status].label }))
 
 function InspectionTable({ inspections }: { inspections: InspectionRow[] }) {
   if (inspections.length === 0) {

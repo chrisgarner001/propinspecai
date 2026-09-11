@@ -2,9 +2,14 @@ export const STATUS_STYLES: Record<string, { label: string; bg: string; text: st
   under_review: { label: 'Under Review', bg: 'bg-neutral-bg', text: 'text-neutral' },
   quote_sent: { label: 'Quote Sent', bg: 'bg-accent-bg', text: 'text-accent-ink' },
   approved: { label: 'Approved', bg: 'bg-success-bg', text: 'text-success' },
-  in_process: { label: 'In Process', bg: 'bg-fair-bg', text: 'text-fair' },
+  scheduled: { label: 'Scheduled', bg: 'bg-accent-bg', text: 'text-accent-ink' },
+  in_process: { label: 'Work In Process', bg: 'bg-fair-bg', text: 'text-fair' },
   completed: { label: 'Completed', bg: 'bg-neutral-bg', text: 'text-neutral' },
 }
+
+// Insertion order above doubles as the canonical display order for every
+// status dropdown/grouping in the app.
+export const STATUS_ORDER = Object.keys(STATUS_STYLES)
 
 export default function StatusBadge({ status }: { status: string }) {
   const style = STATUS_STYLES[status] ?? { label: status, bg: 'bg-neutral-bg', text: 'text-neutral' }
