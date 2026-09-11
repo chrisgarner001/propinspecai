@@ -46,6 +46,34 @@ export async function findPropertyFolder(streetName: string, streetNumber: strin
   return null
 }
 
+// "https://drive.google.com/drive/folders/10nhel1iO..." -> "10nhel1iO..."
+export function parseFolderIdFromUrl(url: string): string | null {
+  const match = url.match(/folders\/([a-zA-Z0-9_-]+)/)
+  return match ? match[1] : null
+}
+
+export async function listVideosInFolder(folderId: string) {
+  const auth = getGoogleAuth()
+  const drive = google.drive({ version: 'v3', auth })
+  const res = await drive.files.list({
+    q: `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+    fields: 'files(id, name, mimeType)',
+  })
+  return (res.data.files ?? []) as { id: string; name: string; mimeType: string }[]
+}
+
+export async function downloadDriveFile(fileId: string): Promise<Buffer> {
+  const auth = getGoogleAuth()
+  const drive = google.drive({ version: 'v3', auth })
+  const res = await drive.files.get(
+    { fileId, alt: 'media', supportsAllDrives: true },
+    { responseType: 'arraybuffer' },
+  )
+  return Buffer.from(res.data as ArrayBuffer)
+}
+
 // "1554 Brest, Lincoln Park, MI" -> { number: "1554", streetName: "Brest" }
 export function parseStreetAddress(propertyAddress: string) {
   const streetPart = propertyAddress.split(',')[0].trim()

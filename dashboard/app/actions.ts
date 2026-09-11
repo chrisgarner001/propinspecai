@@ -3,6 +3,8 @@
 import { getSql } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
+import { parseFolderIdFromUrl, listVideosInFolder, downloadDriveFile } from '@/lib/google'
+import { extractLineItemsFromVideo } from '@/lib/gemini'
 
 function toNumberOrNull(value: FormDataEntryValue | null): number | null {
   if (value === null || value === '') return null
@@ -243,4 +245,132 @@ export async function updateSettings(formData: FormData) {
   `
 
   revalidatePath('/setup')
+}
+
+export type InspectionVideoRow = {
+  id: string
+  drive_file_id: string
+  filename: string
+  status: string
+  error_message: string | null
+  line_items_created: number
+}
+
+// Lists the video files in the inspection's linked Drive folder and adds any
+// not already tracked -- safe to call repeatedly (e.g. if more clips get
+// added to the folder after the first pass). Does not process anything
+// itself; that's processNextInspectionVideo, called in a loop by the client.
+export async function syncInspectionVideos(inspectionId: string): Promise<{ error?: string; videos?: InspectionVideoRow[] }> {
+  const sql = getSql()
+  const [inspection] = await sql`select source_video_drive_folder_url from inspections where id = ${inspectionId}`
+  if (!inspection?.source_video_drive_folder_url) {
+    return { error: 'This inspection has no Google Drive video folder linked.' }
+  }
+
+  const folderId = parseFolderIdFromUrl(inspection.source_video_drive_folder_url)
+  if (!folderId) {
+    return { error: 'Could not parse a Drive folder ID from the linked URL.' }
+  }
+
+  let files
+  try {
+    files = await listVideosInFolder(folderId)
+  } catch (err) {
+    return { error: `Could not list files in the Drive folder: ${(err as Error).message}` }
+  }
+
+  if (files.length === 0) {
+    return { error: 'No video files found in the linked Drive folder.' }
+  }
+
+  for (const file of files) {
+    await sql`
+      insert into inspection_videos (inspection_id, drive_file_id, filename)
+      values (${inspectionId}, ${file.id}, ${file.name})
+      on conflict (inspection_id, drive_file_id) do nothing
+    `
+  }
+
+  const videos = (await sql`
+    select id, drive_file_id, filename, status, error_message, line_items_created
+    from inspection_videos where inspection_id = ${inspectionId} order by created_at
+  `) as unknown as InspectionVideoRow[]
+
+  return { videos }
+}
+
+// Processes exactly one pending video per call -- called in a loop from the
+// client so each request stays short (download + Gemini analysis for a
+// single clip, not the whole batch) and progress is visible after every
+// step, not just at the end. A failure marks that one video 'failed' with a
+// specific reason and stops there; it does NOT skip ahead to the next video
+// silently (the original design doc's own failure-mode requirement: fail
+// loudly, don't drop a bad file quietly).
+export async function processNextInspectionVideo(inspectionId: string): Promise<{ done: boolean; videos: InspectionVideoRow[] }> {
+  const sql = getSql()
+  const [next] = await sql`
+    select id, drive_file_id, filename from inspection_videos
+    where inspection_id = ${inspectionId} and status = 'pending'
+    order by created_at
+    limit 1
+  `
+
+  if (next) {
+    await sql`update inspection_videos set status = 'processing' where id = ${next.id}`
+
+    try {
+      const buffer = await downloadDriveFile(next.drive_file_id)
+      const extracted = await extractLineItemsFromVideo(buffer, next.filename)
+
+      for (const li of extracted) {
+        await sql`
+          insert into line_items (
+            inspection_id, room_area, item, condition, observed_evidence, recommended_action,
+            trade_category, assigned_to, priority, source_timestamp, source_video_file, is_manual_addition
+          )
+          values (
+            ${inspectionId}, ${li.room_area}, ${li.item}, ${li.condition}, ${li.observed_evidence}, ${li.recommended_action},
+            ${li.trade_category}, ${li.assigned_to}, ${li.priority}, ${li.source_timestamp}, ${next.filename}, false
+          )
+        `
+      }
+
+      await sql`
+        update inspection_videos
+        set status = 'done', line_items_created = ${extracted.length}, error_message = null
+        where id = ${next.id}
+      `
+    } catch (err) {
+      await sql`
+        update inspection_videos
+        set status = 'failed', error_message = ${(err as Error).message}
+        where id = ${next.id}
+      `
+    }
+  }
+
+  revalidatePath(`/inspections/${inspectionId}`)
+
+  const videos = (await sql`
+    select id, drive_file_id, filename, status, error_message, line_items_created
+    from inspection_videos where inspection_id = ${inspectionId} order by created_at
+  `) as unknown as InspectionVideoRow[]
+
+  const done = !videos.some((v) => v.status === 'pending' || v.status === 'processing')
+  return { done, videos }
+}
+
+// Resets one failed video back to 'pending' so the next processNextInspectionVideo
+// call in the loop picks it up again -- e.g. after fixing a Drive-permissions
+// issue that caused the original failure.
+export async function retryInspectionVideo(videoRowId: string, inspectionId: string): Promise<{ videos: InspectionVideoRow[] }> {
+  const sql = getSql()
+  await sql`update inspection_videos set status = 'pending', error_message = null where id = ${videoRowId} and status = 'failed'`
+
+  const videos = (await sql`
+    select id, drive_file_id, filename, status, error_message, line_items_created
+    from inspection_videos where inspection_id = ${inspectionId} order by created_at
+  `) as unknown as InspectionVideoRow[]
+
+  return { videos }
 }

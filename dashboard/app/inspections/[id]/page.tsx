@@ -10,6 +10,14 @@ import VideoPopupLink from '@/app/components/VideoPopupLink'
 import DeleteInspectionButton from '@/app/components/DeleteInspectionButton'
 import RemoveSectionControl from '@/app/components/RemoveSectionControl'
 import SaveChangesButton from '@/app/components/SaveChangesButton'
+import VideoProcessingPanel from '@/app/components/VideoProcessingPanel'
+import type { InspectionVideoRow } from '@/app/actions'
+
+// Raised from the platform default for processNextInspectionVideo (called
+// from this page via VideoProcessingPanel) -- downloading a multi-minute
+// clip from Drive and waiting on Gemini's analysis can take well over a
+// minute per video. Confirmed on Vercel Pro, which allows up to 300s.
+export const maxDuration = 300
 
 const CONDITIONS = ['Good', 'Fair', 'Damaged', 'Not Rated']
 const ASSIGNED_TO_OPTIONS = ['GPM Staff', 'Outside Vendor', 'Other']
@@ -66,6 +74,11 @@ export default async function InspectionPage({
   `) as unknown as LineItem[]
 
   const vendors = (await sql`select id, name from vendors order by name`) as unknown as Vendor[]
+
+  const inspectionVideos = (await sql`
+    select id, drive_file_id, filename, status, error_message, line_items_created
+    from inspection_videos where inspection_id = ${id} order by created_at
+  `) as unknown as InspectionVideoRow[]
 
   const [settings] = await sql`select gpm_labor_charge from settings where id = true`
   const laborRate = Number(settings?.gpm_labor_charge ?? 0)
@@ -141,6 +154,10 @@ export default async function InspectionPage({
             </div>
           )}
         </div>
+      )}
+
+      {inspection.source_video_drive_folder_url && (
+        <VideoProcessingPanel inspectionId={id} initialVideos={inspectionVideos} />
       )}
 
       <form action={bulkUpdateLineItems}>
