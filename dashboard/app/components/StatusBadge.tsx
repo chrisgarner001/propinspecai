@@ -1,4 +1,5 @@
 export const STATUS_STYLES: Record<string, { label: string; bg: string; text: string }> = {
+  under_review: { label: 'Under Review', bg: 'bg-neutral-bg', text: 'text-neutral' },
   quote_sent: { label: 'Quote Sent', bg: 'bg-accent-bg', text: 'text-accent-ink' },
   approved: { label: 'Approved', bg: 'bg-success-bg', text: 'text-success' },
   in_process: { label: 'In Process', bg: 'bg-fair-bg', text: 'text-fair' },
