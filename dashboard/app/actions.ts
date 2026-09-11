@@ -226,11 +226,13 @@ export async function addLineItem(formData: FormData) {
   const condition = String(formData.get('condition'))
   const assignedToRaw = formData.get('assigned_to')
   const assignedTo = assignedToRaw ? String(assignedToRaw) : null
+  const vendorIdRaw = formData.get('vendor_id')
+  const vendorId = vendorIdRaw ? String(vendorIdRaw) : null
   const recommendedAction = String(formData.get('recommended_action') || '')
 
   await sql`
-    insert into line_items (inspection_id, room_area, item, condition, assigned_to, recommended_action, is_manual_addition)
-    values (${inspectionId}, ${roomArea}, ${item}, ${condition}, ${assignedTo}, ${recommendedAction}, true)
+    insert into line_items (inspection_id, room_area, item, condition, assigned_to, vendor_id, recommended_action, is_manual_addition)
+    values (${inspectionId}, ${roomArea}, ${item}, ${condition}, ${assignedTo}, ${vendorId}, ${recommendedAction}, true)
   `
 
   revalidatePath(`/inspections/${inspectionId}`)

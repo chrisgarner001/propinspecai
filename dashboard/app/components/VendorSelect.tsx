@@ -13,9 +13,9 @@ export default function VendorSelect({
     <select
       name={name}
       defaultValue={defaultValue ?? ''}
-      className="appearance-none bg-transparent border-none p-0 text-accent underline decoration-accent/40 hover:text-accent-hover cursor-pointer text-[13px] font-medium"
+      className="text-[12px] border border-border rounded-[var(--radius-sm)] px-1.5 py-1 w-full bg-surface text-accent font-medium cursor-pointer"
     >
-      <option value=""></option>
+      <option value="">Select vendor…</option>
       {vendors.map((v) => (
         <option key={v.id} value={v.id}>
           {v.name}

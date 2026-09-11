@@ -14,19 +14,22 @@ import { useState } from 'react'
 // Quote PDF (see quote-sheet/page.tsx and quote-sheet/pdf/route.ts's query
 // filters).
 //
-// Tenant Charge is now a client component (not plain uncontrolled
-// checkboxes) so the charge-amount override field can enable/disable
-// live as the checkbox toggles, matching the LineItemAssignment pattern --
-// a server-rendered `disabled` only reflects the DB value at page load.
+// Tenant Charge is a client component (not plain uncontrolled checkboxes) so
+// the charge-amount field can mount/unmount live as the checkbox toggles --
+// it's hidden entirely until Tenant Charge is checked, then starts out
+// prefilled with the full materials+labor cost (defaultTotal), which the
+// reviewer can lower for partial tenant responsibility.
 export default function TenantChargeCheckboxes({
   id,
   tenantCharge: initialTenantCharge,
   tenantChargeAmount,
+  defaultTotal,
   removedFromQuoteSheet,
 }: {
   id: string
   tenantCharge: boolean
   tenantChargeAmount: string | null
+  defaultTotal: number
   removedFromQuoteSheet: boolean
 }) {
   const [tenantCharge, setTenantCharge] = useState(initialTenantCharge)
@@ -41,16 +44,16 @@ export default function TenantChargeCheckboxes({
           onChange={(e) => setTenantCharge(e.target.checked)}
           className="h-4 w-4 cursor-pointer accent-accent"
         />
-        <input
-          type="number"
-          step="1"
-          name={`tenant_charge_amount__${id}`}
-          defaultValue={tenantChargeAmount ?? ''}
-          disabled={!tenantCharge}
-          placeholder="Full cost"
-          title="Amount actually charged to the tenant, if less than the full materials + labor cost"
-          className="text-[11px] data-mono border border-border rounded-[var(--radius-sm)] px-1 py-0.5 w-16 min-w-0 bg-surface disabled:bg-surface-alt disabled:text-text-muted text-center"
-        />
+        {tenantCharge && (
+          <input
+            type="number"
+            step="1"
+            name={`tenant_charge_amount__${id}`}
+            defaultValue={tenantChargeAmount ?? defaultTotal}
+            title="Amount actually charged to the tenant, if less than the full materials + labor cost"
+            className="text-[11px] data-mono border border-border rounded-[var(--radius-sm)] px-1 py-0.5 w-16 min-w-0 bg-surface text-center"
+          />
+        )}
       </div>
       <div role="cell" className="min-w-0 flex justify-center">
         <input

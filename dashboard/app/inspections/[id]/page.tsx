@@ -5,6 +5,7 @@ import AppShell from '@/app/components/AppShell'
 import StatusSelect from '@/app/components/StatusSelect'
 import EvidenceStill from '@/app/components/EvidenceStill'
 import LineItemAssignment from '@/app/components/LineItemAssignment'
+import NewLineItemAssignedTo from '@/app/components/NewLineItemAssignedTo'
 import TenantChargeCheckboxes from '@/app/components/TenantChargeCheckboxes'
 import VideoPopupLink from '@/app/components/VideoPopupLink'
 import DeleteInspectionButton from '@/app/components/DeleteInspectionButton'
@@ -20,7 +21,6 @@ import type { InspectionVideoRow } from '@/app/actions'
 export const maxDuration = 300
 
 const CONDITIONS = ['Good', 'Fair', 'Damaged', 'Not Rated']
-const ASSIGNED_TO_OPTIONS = ['GPM Staff', 'Outside Vendor', 'Other']
 
 function areaAnchor(roomArea: string) {
   return `area-${roomArea.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}`
@@ -285,6 +285,7 @@ export default async function InspectionPage({
                 id={li.id}
                 tenantCharge={li.tenant_charge}
                 tenantChargeAmount={li.tenant_charge_amount}
+                defaultTotal={Number(li.materials_cost ?? 0) + Number(li.labor_cost ?? 0)}
                 removedFromQuoteSheet={li.tenant_approved}
               />
             </div>
@@ -338,17 +339,7 @@ export default async function InspectionPage({
             <label className="block text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1">
               Assigned To
             </label>
-            <select
-              name="assigned_to"
-              className="border border-border rounded-[var(--radius-sm)] px-2 py-1.5 w-full bg-surface"
-            >
-              <option value="">—</option>
-              {ASSIGNED_TO_OPTIONS.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </select>
+            <NewLineItemAssignedTo vendors={vendors} />
           </div>
           <div className="col-span-2">
             <label className="block text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1">
