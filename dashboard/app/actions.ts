@@ -73,6 +73,58 @@ export async function bulkUpdateLineItems(formData: FormData) {
   revalidatePath(`/inspections/${inspectionId}`)
 }
 
+// Saves edits made in the Quote Sheet editor (app/inspections/[id]/quote-sheet).
+// A distinct action from bulkUpdateLineItems above -- that one deliberately
+// keeps room_area/item read-only (edited in-place would desync the video
+// timestamp mapping and the room quick-jump anchors on the main inspection
+// page); this page's whole purpose is polishing the item text before it goes
+// to the owner, so those two fields ARE editable here.
+export async function updateQuoteSheetItems(formData: FormData) {
+  const sql = getSql()
+  const inspectionId = String(formData.get('inspection_id'))
+  const ids = formData.getAll('ids').map(String)
+
+  const [settings] = await sql`select gpm_labor_charge from settings where id = true`
+  const laborRate = Number(settings?.gpm_labor_charge ?? 0)
+
+  for (const id of ids) {
+    const roomArea = String(formData.get(`room_area__${id}`) ?? '')
+    const item = String(formData.get(`item__${id}`) ?? '')
+    const observedEvidenceRaw = formData.get(`observed_evidence__${id}`)
+    const observedEvidence = observedEvidenceRaw ? String(observedEvidenceRaw) : null
+    const recommendedAction = String(formData.get(`recommended_action__${id}`) ?? '')
+    const assignedToRaw = formData.get(`assigned_to__${id}`)
+    const assignedTo = assignedToRaw ? String(assignedToRaw) : null
+    const vendorIdRaw = formData.get(`vendor_id__${id}`)
+    const vendorId = vendorIdRaw ? String(vendorIdRaw) : null
+    const laborHours = toNumberOrNull(formData.get(`labor_hours__${id}`))
+    const laborCost = laborHours !== null ? laborHours * laborRate : null
+    const materialsCost = toNumberOrNull(formData.get(`materials_cost__${id}`))
+    const vendorEstimatedCost = toNumberOrNull(formData.get(`vendor_estimated_cost__${id}`))
+    const quoteStageRaw = formData.get(`quote_stage__${id}`)
+    const quoteStage = quoteStageRaw ? String(quoteStageRaw) : null
+
+    await sql`
+      update line_items
+      set
+        room_area = ${roomArea},
+        item = ${item},
+        observed_evidence = ${observedEvidence},
+        recommended_action = ${recommendedAction},
+        assigned_to = ${assignedTo},
+        vendor_id = ${vendorId},
+        labor_hours = ${laborHours},
+        labor_cost = ${laborCost},
+        materials_cost = ${materialsCost},
+        vendor_estimated_cost = ${vendorEstimatedCost},
+        quote_stage = ${quoteStage}
+      where id = ${id}
+    `
+  }
+
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, id, inspectionId) call site; formAction always passes the triggering form's FormData last
 export async function duplicateLineItem(id: string, inspectionId: string, _formData: FormData) {
   const sql = getSql()

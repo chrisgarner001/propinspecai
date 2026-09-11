@@ -17,9 +17,10 @@ export default function StatusSelect({ inspectionId, status }: { inspectionId: s
         onChange={() => formRef.current?.requestSubmit()}
         className={`appearance-none rounded-full pl-4 pr-2.5 py-0.5 text-[12px] font-semibold border-none cursor-pointer ${style.bg} ${style.text}`}
       >
-        <option value="pending_review">Pending review</option>
-        <option value="reviewed">Reviewed</option>
-        <option value="exported">Exported</option>
+        <option value="quote_sent">Quote Sent</option>
+        <option value="approved">Approved</option>
+        <option value="in_process">In Process</option>
+        <option value="completed">Completed</option>
       </select>
     </form>
   )

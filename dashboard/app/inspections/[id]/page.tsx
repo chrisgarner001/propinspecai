@@ -100,15 +100,7 @@ export default async function InspectionPage({
         <DeleteInspectionButton action={deleteInspection.bind(null, id)} label="Delete inspection" />
         <div className="flex items-center gap-2">
           <a
-            href={`/inspections/${id}/timeline`}
-            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
-          >
-            Job Timeline
-          </a>
-          <a
-            href={`/inspections/${id}/turn-scope`}
-            target="_blank"
-            rel="noopener noreferrer"
+            href={`/inspections/${id}/quote-sheet`}
             className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
           >
             Create Quote Sheet
@@ -129,7 +121,10 @@ export default async function InspectionPage({
             {new Date(inspection.inspection_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}
           </span>
         </div>
-        <StatusSelect inspectionId={id} status={inspection.status} />
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">Status</span>
+          <StatusSelect inspectionId={id} status={inspection.status} />
+        </div>
       </div>
 
       {(inspection.source_video_drive_folder_url ||

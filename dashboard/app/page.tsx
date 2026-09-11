@@ -19,9 +19,10 @@ type InspectionRow = {
 }
 
 const STATUS_GROUPS: { status: string; label: string }[] = [
-  { status: 'pending_review', label: 'Pending review' },
-  { status: 'reviewed', label: 'Reviewed' },
-  { status: 'exported', label: 'Exported' },
+  { status: 'quote_sent', label: 'Quote Sent' },
+  { status: 'approved', label: 'Approved' },
+  { status: 'in_process', label: 'In Process' },
+  { status: 'completed', label: 'Completed' },
 ]
 
 function InspectionTable({ inspections }: { inspections: InspectionRow[] }) {

@@ -10,8 +10,9 @@ import { useState } from 'react'
 // removedFromQuoteSheet is stored in line_items.tenant_approved -- that
 // column originally meant tenant approval, but is unused for that purpose
 // (0 rows ever set it) and has been repurposed rather than adding a new
-// column. Checked = excluded from the generated Quote Sheet (see
-// turn-scope/route.ts's query filter).
+// column. Checked = excluded from the Quote Sheet editor and the generated
+// Quote PDF (see quote-sheet/page.tsx and quote-sheet/pdf/route.ts's query
+// filters).
 //
 // Tenant Charge is now a client component (not plain uncontrolled
 // checkboxes) so the charge-amount override field can enable/disable

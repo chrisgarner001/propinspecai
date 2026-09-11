@@ -1,7 +1,8 @@
 export const STATUS_STYLES: Record<string, { label: string; bg: string; text: string }> = {
-  pending_review: { label: 'Pending review', bg: 'bg-accent-bg', text: 'text-accent-ink' },
-  reviewed: { label: 'Reviewed', bg: 'bg-success-bg', text: 'text-success' },
-  exported: { label: 'Exported', bg: 'bg-neutral-bg', text: 'text-neutral' },
+  quote_sent: { label: 'Quote Sent', bg: 'bg-accent-bg', text: 'text-accent-ink' },
+  approved: { label: 'Approved', bg: 'bg-success-bg', text: 'text-success' },
+  in_process: { label: 'In Process', bg: 'bg-fair-bg', text: 'text-fair' },
+  completed: { label: 'Completed', bg: 'bg-neutral-bg', text: 'text-neutral' },
 }
 
 export default function StatusBadge({ status }: { status: string }) {
