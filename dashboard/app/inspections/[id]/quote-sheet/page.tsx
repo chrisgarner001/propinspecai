@@ -1,6 +1,6 @@
 import { getSql } from '@/lib/db'
 import { notFound } from 'next/navigation'
-import { updateQuoteSheetItems, createWorkOrderBatches } from '@/app/actions'
+import { updateQuoteSheetItems, createBatches } from '@/app/actions'
 import AppShell from '@/app/components/AppShell'
 import LineItemAssignment from '@/app/components/LineItemAssignment'
 import SaveChangesButton from '@/app/components/SaveChangesButton'
@@ -49,11 +49,10 @@ type LineItem = {
   quote_stage: string | null
   supplier: string | null
   sku: string | null
-  work_order_id: string | null
+  batch_number: number | null
 }
 
 type Vendor = { id: string; name: string }
-type WorkOrder = { id: string; type: string; vendor_name: string | null; item_count: number }
 
 export default async function QuoteSheetPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -64,7 +63,7 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
 
   const lineItems = (await sql`
     select id, room_area, item, observed_evidence, recommended_action, assigned_to, vendor_id,
-      labor_hours, materials_cost, vendor_estimated_cost, quote_stage, supplier, sku, work_order_id
+      labor_hours, materials_cost, vendor_estimated_cost, quote_stage, supplier, sku, batch_number
     from line_items
     where inspection_id = ${id} and tenant_approved = false
     order by room_area, created_at
@@ -72,20 +71,14 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
 
   const vendors = (await sql`select id, name from vendors order by name`) as unknown as Vendor[]
 
-  const workOrders = (await sql`
-    select wo.id, wo.type, v.name as vendor_name, count(li.id)::int as item_count
-    from work_orders wo
-    left join vendors v on v.id = wo.vendor_id
-    left join line_items li on li.work_order_id = wo.id
-    where wo.inspection_id = ${id}
-    group by wo.id, wo.type, v.name
-    order by wo.type, v.name
-  `) as unknown as WorkOrder[]
-  const workOrderLabel = (workOrderId: string | null) => {
-    if (!workOrderId) return null
-    const wo = workOrders.find((w) => w.id === workOrderId)
-    return wo ? (wo.type === 'gpm' ? 'GPM Staff' : (wo.vendor_name ?? 'Vendor')) : null
-  }
+  const batchSummary = [
+    ...lineItems.reduce((map, li) => {
+      if (li.batch_number === null) return map
+      if (!map.has(li.batch_number)) map.set(li.batch_number, 0)
+      map.set(li.batch_number, map.get(li.batch_number)! + 1)
+      return map
+    }, new Map<number, number>()),
+  ].sort((a, b) => a[0] - b[0])
 
   const [settings] = await sql`select gpm_labor_charge from settings where id = true`
   const laborRate = Number(settings?.gpm_labor_charge ?? 0)
@@ -114,7 +107,7 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
               Job Timeline
             </a>
           )}
-          <form action={createWorkOrderBatches.bind(null, id)}>
+          <form action={createBatches.bind(null, id)}>
             <button
               type="submit"
               className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
@@ -122,6 +115,12 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
               Create Batches
             </button>
           </form>
+          <a
+            href={`/inspections/${id}/quote-sheet/batches`}
+            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
+          >
+            Batch View
+          </a>
           <a
             href={`/inspections/${id}/quote-sheet/pdf`}
             target="_blank"
@@ -133,12 +132,12 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
         </div>
       </div>
 
-      {workOrders.length > 0 && (
+      {batchSummary.length > 0 && (
         <div className="flex flex-wrap gap-x-4 gap-y-1 px-6 py-2 border-b border-border bg-surface-alt text-[12px]">
-          <span className="font-semibold text-text-muted uppercase tracking-wide text-[11px]">Work Orders</span>
-          {workOrders.map((wo) => (
-            <span key={wo.id} className="text-text-muted">
-              {wo.type === 'gpm' ? 'GPM Staff' : (wo.vendor_name ?? 'Vendor')} ({wo.item_count})
+          <span className="font-semibold text-text-muted uppercase tracking-wide text-[11px]">Batches</span>
+          {batchSummary.map(([batchNumber, count]) => (
+            <span key={batchNumber} className="text-text-muted">
+              Batch {batchNumber} ({count})
             </span>
           ))}
         </div>
@@ -148,7 +147,7 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
         <input type="hidden" name="inspection_id" value={id} />
         <div role="table">
           <div role="row" className={`grid ${ROW_COLS} gap-2 px-3 py-2.5 border-b border-border`}>
-            {['Area', 'Details', 'Comments', 'Vendor/GPM', 'Materials', 'Labor (hrs)', 'Vendor Quote', 'Stage', 'Supplier/SKU', 'Work Order'].map((h) => (
+            {['Area', 'Details', 'Comments', 'Vendor/GPM', 'Materials', 'Labor (hrs)', 'Vendor Quote', 'Stage', 'Supplier/SKU', 'Batch'].map((h) => (
               <div key={h} role="columnheader" className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
                 {h}
               </div>
@@ -218,8 +217,16 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
                   className={`${miniField} data-mono`}
                 />
               </div>
-              <div role="cell" className="min-w-0 text-[12px] text-text-muted truncate" title={workOrderLabel(li.work_order_id) ?? ''}>
-                {workOrderLabel(li.work_order_id) ?? '—'}
+              <div role="cell" className="min-w-0">
+                <input
+                  type="number"
+                  step="1"
+                  name={`batch_number__${li.id}`}
+                  defaultValue={li.batch_number ?? ''}
+                  placeholder="—"
+                  title="Batch number -- edit to move this item into a different batch, or a new number to start one"
+                  className={`${miniField} data-mono text-center`}
+                />
               </div>
             </div>
           ))}

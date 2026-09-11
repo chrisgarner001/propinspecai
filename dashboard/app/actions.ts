@@ -107,6 +107,8 @@ export async function updateQuoteSheetItems(formData: FormData) {
     const supplier = supplierRaw ? String(supplierRaw) : null
     const skuRaw = formData.get(`sku__${id}`)
     const sku = skuRaw ? String(skuRaw) : null
+    const batchNumberRaw = toNumberOrNull(formData.get(`batch_number__${id}`))
+    const batchNumber = batchNumberRaw !== null ? Math.round(batchNumberRaw) : null
 
     await sql`
       update line_items
@@ -123,7 +125,8 @@ export async function updateQuoteSheetItems(formData: FormData) {
         vendor_estimated_cost = ${vendorEstimatedCost},
         quote_stage = ${quoteStage},
         supplier = ${supplier},
-        sku = ${sku}
+        sku = ${sku},
+        batch_number = ${batchNumber}
       where id = ${id}
     `
   }
@@ -131,55 +134,74 @@ export async function updateQuoteSheetItems(formData: FormData) {
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
 }
 
-// Groups Quote Sheet line items into Work Order batches by their CURRENT
-// Assigned To / Vendor: one shared batch for every "GPM Staff" item, and one
-// batch per distinct vendor for every "Outside Vendor" item that already has
-// a vendor picked. Items assigned to "Other", left unassigned, or "Outside
-// Vendor" with no vendor chosen yet are left unbatched -- there's no
-// sensible single batch to put them in.
+// Auto-fills batch_number for whichever line items don't have one yet, by
+// CURRENT Assigned To / Vendor: one new batch number for every unbatched
+// "GPM Staff" item, and one new batch number per distinct vendor for every
+// unbatched "Outside Vendor" item that already has a vendor picked. Items
+// assigned to "Other", left unassigned, or "Outside Vendor" with no vendor
+// chosen yet are left unbatched -- there's no sensible single batch to put
+// them in.
 //
-// Re-runnable: clears this inspection's existing batches first and
-// regroups from scratch, so it reflects the latest assignments rather than
-// only the first time it's run (assignments commonly change after an
-// initial pass).
+// Deliberately never touches an item that already has a batch_number --
+// batch_number is manually editable on the Quote Sheet (Regular View) so a
+// reviewer can freely reassign/split items (e.g. GPM items across two
+// techs, since there's no per-technician concept yet); re-running this
+// button must not clobber that.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, inspectionId) call site; formAction always passes the triggering form's FormData last
-export async function createWorkOrderBatches(inspectionId: string, _formData: FormData) {
+export async function createBatches(inspectionId: string, _formData: FormData) {
   const sql = getSql()
-
-  await sql`
-    update line_items set work_order_id = null
-    where inspection_id = ${inspectionId} and work_order_id is not null
-  `
-  await sql`delete from work_orders where inspection_id = ${inspectionId}`
 
   const items = await sql`
     select id, assigned_to, vendor_id from line_items
-    where inspection_id = ${inspectionId} and tenant_approved = false
+    where inspection_id = ${inspectionId} and tenant_approved = false and batch_number is null
   `
+  if (items.length > 0) {
+    const [{ max }] = await sql`select max(batch_number) as max from line_items where inspection_id = ${inspectionId}`
+    let nextBatch = (max ?? 0) + 1
 
-  const gpmItemIds = items.filter((li) => li.assigned_to === 'GPM Staff').map((li) => li.id)
-  if (gpmItemIds.length > 0) {
-    const [wo] = await sql`insert into work_orders (inspection_id, type) values (${inspectionId}, 'gpm') returning id`
-    await sql`update line_items set work_order_id = ${wo.id} where id in ${sql(gpmItemIds)}`
-  }
+    const gpmItemIds = items.filter((li) => li.assigned_to === 'GPM Staff').map((li) => li.id)
+    if (gpmItemIds.length > 0) {
+      await sql`update line_items set batch_number = ${nextBatch} where id in ${sql(gpmItemIds)}`
+      nextBatch++
+    }
 
-  const vendorIds = [
-    ...new Set(
-      items.filter((li) => li.assigned_to === 'Outside Vendor' && li.vendor_id !== null).map((li) => li.vendor_id as string),
-    ),
-  ]
-  for (const vendorId of vendorIds) {
-    const vendorItemIds = items
-      .filter((li) => li.assigned_to === 'Outside Vendor' && li.vendor_id === vendorId)
-      .map((li) => li.id)
-    const [wo] = await sql`
-      insert into work_orders (inspection_id, type, vendor_id) values (${inspectionId}, 'vendor', ${vendorId})
-      returning id
-    `
-    await sql`update line_items set work_order_id = ${wo.id} where id in ${sql(vendorItemIds)}`
+    const vendorIds = [
+      ...new Set(
+        items.filter((li) => li.assigned_to === 'Outside Vendor' && li.vendor_id !== null).map((li) => li.vendor_id as string),
+      ),
+    ]
+    for (const vendorId of vendorIds) {
+      const vendorItemIds = items
+        .filter((li) => li.assigned_to === 'Outside Vendor' && li.vendor_id === vendorId)
+        .map((li) => li.id)
+      await sql`update line_items set batch_number = ${nextBatch} where id in ${sql(vendorItemIds)}`
+      nextBatch++
+    }
   }
 
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet/batches`)
+}
+
+// STAND-IN for the real PropertyWare integration -- there's no PW API
+// access/docs available yet (see quote-sheet/batches/page.tsx). Records a
+// manually-typed PW work order number against this batch instead of
+// actually calling PropertyWare's API. Swapping in the real call later
+// means replacing the body of this function; callers/UI stay the same.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, inspectionId, batchNumber) call site; formAction always passes the triggering form's FormData last
+export async function sendBatchToPW(inspectionId: string, batchNumber: number, formData: FormData) {
+  const sql = getSql()
+  const pwWorkOrderNumber = String(formData.get('pw_work_order_number') ?? '').trim()
+  if (!pwWorkOrderNumber) return
+
+  await sql`
+    insert into work_order_batches (inspection_id, batch_number, pw_work_order_number, sent_to_pw_at)
+    values (${inspectionId}, ${batchNumber}, ${pwWorkOrderNumber}, now())
+    on conflict (inspection_id, batch_number)
+    do update set pw_work_order_number = excluded.pw_work_order_number, sent_to_pw_at = excluded.sent_to_pw_at
+  `
+
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet/batches`)
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, id, inspectionId) call site; formAction always passes the triggering form's FormData last
