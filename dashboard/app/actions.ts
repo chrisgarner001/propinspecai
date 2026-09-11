@@ -74,6 +74,12 @@ export async function duplicateLineItem(id: string, inspectionId: string, _formD
   // created_at nudged forward 1ms so the duplicate sorts immediately after
   // the original in the (room_area, created_at) list ordering, directly
   // below it, rather than at the end of the room group.
+  //
+  // status/scheduled_start/scheduled_end/blocks_line_item_id are deliberately
+  // OMITTED here, not copied from `original` -- a duplicate is a distinct,
+  // newly-noticed task and should start not_started/unscheduled, not
+  // inherit the original's job-tracking state. New line_items columns need
+  // a deliberate decision here, not silent inheritance via SELECT *.
   await sql`
     insert into line_items (
       inspection_id, room_area, item, condition, observed_evidence, assigned_to,
@@ -93,6 +99,59 @@ export async function duplicateLineItem(id: string, inspectionId: string, _formD
   `
 
   revalidatePath(`/inspections/${inspectionId}`)
+}
+
+// Called directly from the Job Timeline's client component (drag-end commit,
+// or the keyboard-accessible plain date inputs) -- not a form action, so it
+// takes a plain object rather than FormData. Always sets all 4 fields
+// together (the client sends the item's full current schedule state, not a
+// partial patch), matching bulkUpdateLineItems' own convention.
+export async function updateLineItemSchedule(input: {
+  id: string
+  inspectionId: string
+  status: string
+  scheduledStart: string | null
+  scheduledEnd: string | null
+  blocksLineItemId: string | null
+}): Promise<{ error?: string }> {
+  const sql = getSql()
+  const { id, inspectionId, blocksLineItemId } = input
+
+  if (blocksLineItemId !== null) {
+    if (blocksLineItemId === id) {
+      return { error: 'A line item cannot block itself.' }
+    }
+    const rows = (await sql`
+      select id, blocks_line_item_id from line_items where inspection_id = ${inspectionId}
+    `) as { id: string; blocks_line_item_id: string | null }[]
+    const nextBlock = new Map(rows.map((r) => [r.id, r.blocks_line_item_id]))
+    // Walk the chain starting from the proposed predecessor; if it ever
+    // leads back to `id`, setting this link would create a cycle. `seen`
+    // guards against looping forever if a cycle already exists elsewhere.
+    let cursor: string | null = blocksLineItemId
+    const seen = new Set<string>()
+    while (cursor) {
+      if (cursor === id) {
+        return { error: 'That would create a scheduling dependency cycle.' }
+      }
+      if (seen.has(cursor)) break
+      seen.add(cursor)
+      cursor = nextBlock.get(cursor) ?? null
+    }
+  }
+
+  await sql`
+    update line_items
+    set
+      status = ${input.status},
+      scheduled_start = ${input.scheduledStart},
+      scheduled_end = ${input.scheduledEnd},
+      blocks_line_item_id = ${blocksLineItemId}
+    where id = ${id}
+  `
+
+  revalidatePath(`/inspections/${inspectionId}/timeline`)
+  return {}
 }
 
 export async function addLineItem(formData: FormData) {

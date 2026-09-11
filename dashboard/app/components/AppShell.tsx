@@ -43,7 +43,7 @@ export default function AppShell({
 }) {
   return (
     <div
-      className={`grid grid-cols-[200px_minmax(0,1fr)] border border-border rounded-lg overflow-hidden bg-surface mx-auto my-10 ${wide ? 'max-w-[1440px]' : 'max-w-6xl'}`}
+      className={`grid grid-cols-[200px_minmax(0,1fr)] border border-border rounded-lg overflow-hidden bg-surface mx-auto my-10 w-full ${wide ? 'max-w-[1440px]' : 'max-w-6xl'}`}
     >
       <nav className="bg-surface-alt border-r border-border p-4">
         <div className="mb-6">

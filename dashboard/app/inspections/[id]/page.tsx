@@ -76,6 +76,12 @@ export default async function InspectionPage({
         <DeleteInspectionButton action={deleteInspection.bind(null, id)} label="Delete inspection" />
         <div className="flex items-center gap-2">
           <a
+            href={`/inspections/${id}/timeline`}
+            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
+          >
+            Job Timeline
+          </a>
+          <a
             href={`/inspections/${id}/turn-scope`}
             target="_blank"
             rel="noopener noreferrer"
