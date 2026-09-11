@@ -44,6 +44,7 @@ export async function bulkUpdateLineItems(formData: FormData) {
     const laborCost = laborHours !== null ? laborHours * laborRate : null
     const vendorEstimatedCost = toNumberOrNull(formData.get(`vendor_estimated_cost__${id}`))
     const tenantCharge = formData.get(`tenant_charge__${id}`) !== null
+    const tenantChargeAmount = toNumberOrNull(formData.get(`tenant_charge_amount__${id}`))
     const tenantApproved = formData.get(`tenant_approved__${id}`) !== null
     const vendorIdRaw = formData.get(`vendor_id__${id}`)
     const vendorId = vendorIdRaw ? String(vendorIdRaw) : null
@@ -62,6 +63,7 @@ export async function bulkUpdateLineItems(formData: FormData) {
         labor_cost = ${laborCost},
         vendor_estimated_cost = ${vendorEstimatedCost},
         tenant_charge = ${tenantCharge},
+        tenant_charge_amount = ${tenantChargeAmount},
         tenant_approved = ${tenantApproved},
         vendor_id = ${vendorId}
       where id = ${id}
@@ -87,20 +89,23 @@ export async function duplicateLineItem(id: string, inspectionId: string, _formD
   // newly-noticed task and should start not_started/unscheduled, not
   // inherit the original's job-tracking state. New line_items columns need
   // a deliberate decision here, not silent inheritance via SELECT *.
+  // excluded_from_quote_sheet is likewise omitted (defaults to false) for the
+  // same reason -- a duplicate should appear in the Quote Sheet even if the
+  // original was excluded from it.
   await sql`
     insert into line_items (
       inspection_id, room_area, item, condition, observed_evidence, assigned_to,
       trade_category, recommended_action, priority, materials_cost, labor_hours,
-      labor_cost, vendor_estimated_cost, tenant_charge, tenant_approved, is_manual_addition,
-      source_timestamp, source_video_file, still_image_file, vendor_id, created_at
+      labor_cost, vendor_estimated_cost, tenant_charge, tenant_charge_amount, tenant_approved, is_manual_addition,
+      source_timestamp, source_video_file, source_video_drive_file_id, still_image_file, vendor_id, created_at
     )
     values (
       ${original.inspection_id}, ${original.room_area}, ${original.item}, ${original.condition},
       ${original.observed_evidence}, ${original.assigned_to}, ${original.trade_category},
       ${original.recommended_action}, ${original.priority}, ${original.materials_cost},
       ${original.labor_hours}, ${original.labor_cost}, ${original.vendor_estimated_cost},
-      ${original.tenant_charge}, ${original.tenant_approved}, true,
-      ${original.source_timestamp}, ${original.source_video_file}, ${original.still_image_file},
+      ${original.tenant_charge}, ${original.tenant_charge_amount}, ${original.tenant_approved}, true,
+      ${original.source_timestamp}, ${original.source_video_file}, ${original.source_video_drive_file_id}, ${original.still_image_file},
       ${original.vendor_id}, ${original.created_at}::timestamptz + interval '1 millisecond'
     )
   `

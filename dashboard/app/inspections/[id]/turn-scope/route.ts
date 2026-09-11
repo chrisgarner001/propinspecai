@@ -33,10 +33,17 @@ const BORDER = { style: 'SOLID', width: 1, color: { red: 0, green: 0, blue: 0 } 
 const TURN_SCOPE_SHEET_ID = 0
 const VENDOR_SHEET_ID = 1
 
-function cell(value: { stringValue?: string; numberValue?: number; formulaValue?: string }, bold = false) {
+function cell(
+  value: { stringValue?: string; numberValue?: number; formulaValue?: string },
+  bold = false,
+  extra: { fontSize?: number; wrap?: boolean } = {},
+) {
   return {
     userEnteredValue: value,
-    userEnteredFormat: { textFormat: { bold, fontSize: 12 } },
+    userEnteredFormat: {
+      textFormat: { bold, fontSize: extra.fontSize ?? 12 },
+      ...(extra.wrap ? { wrapStrategy: 'WRAP' as const } : {}),
+    },
   }
 }
 
@@ -72,7 +79,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       li.assigned_to, li.labor_hours, li.materials_cost, li.vendor_estimated_cost, v.name as vendor_name
     from line_items li
     left join vendors v on v.id = li.vendor_id
-    where li.inspection_id = ${id}
+    where li.inspection_id = ${id} and li.tenant_approved = false
     order by li.room_area, li.created_at
   `) as unknown as LineItem[]
 
@@ -83,7 +90,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // Create empty, directly inside the property's Shared Drive folder.
   const file = await drive.files.create({
     requestBody: {
-      name: `Turn Scope - ${inspection.property_address} ${inspection.job_number}`,
+      name: `Quote Sheet - ${inspection.property_address} ${inspection.job_number}`,
       mimeType: 'application/vnd.google-apps.spreadsheet',
       parents: [folder.folderId],
     },
@@ -104,7 +111,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         cell({ numberValue: idx + 1 }),
         cell({ stringValue: li.room_area }),
         cell({ stringValue: li.item }),
-        cell({ stringValue: comments }),
+        cell({ stringValue: comments }, false, { wrap: true }),
         cell({ stringValue: vendorGpm }),
         li.labor_hours !== null ? cell({ numberValue: Number(li.labor_hours) }) : cell({}),
         li.materials_cost !== null ? cell({ numberValue: Number(li.materials_cost) }) : cell({}),
@@ -131,7 +138,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         // Rename the default first sheet, add the VendorsEstimates tab.
         {
           updateSheetProperties: {
-            properties: { sheetId: TURN_SCOPE_SHEET_ID, title: 'Turn Scope' },
+            properties: { sheetId: TURN_SCOPE_SHEET_ID, title: 'Quote Sheet' },
             fields: 'title',
           },
         },
@@ -140,14 +147,34 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
             properties: { sheetId: VENDOR_SHEET_ID, title: 'VendorsEstimates' },
           },
         },
-        // Row 3 (0-indexed row 2): address, running-hours-total label + formula.
+        // Row 1: title. Row 2: inspection date.
+        {
+          updateCells: {
+            start: { sheetId: TURN_SCOPE_SHEET_ID, rowIndex: 0, columnIndex: 1 },
+            rows: [
+              { values: [cell({ stringValue: `Quote Sheet For ${inspection.property_address}` }, true, { fontSize: 16 })] },
+              {
+                values: [
+                  cell(
+                    {
+                      stringValue: `Inspection Date: ${new Date(inspection.inspection_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}`,
+                    },
+                    true,
+                  ),
+                ],
+              },
+            ],
+            fields: 'userEnteredValue,userEnteredFormat',
+          },
+        },
+        // Row 3 (0-indexed row 2): address (2x the base 12pt font), running-hours-total label + formula.
         {
           updateCells: {
             start: { sheetId: TURN_SCOPE_SHEET_ID, rowIndex: 2, columnIndex: 1 },
             rows: [
               {
                 values: [
-                  cell({ stringValue: inspection.property_address }, true),
+                  cell({ stringValue: inspection.property_address }, true, { fontSize: 24 }),
                   cell({}),
                   cell({}),
                   cell({ stringValue: 'Running Labor Hours Total ' }, true),
@@ -252,12 +279,20 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
             fields: 'pixelSize',
           },
         },
-        // Comments (D) auto-sized to its content instead of a fixed width --
-        // must run after the data-row updateCells above so it measures the
-        // actual comment text, not an empty column.
+        // Comments (D): fixed 540px width with wrapped text (wrap set per-cell
+        // above). Row heights are then auto-resized to fit the now-wrapped
+        // text -- must run after both the data rows and this width are set,
+        // since wrapped height depends on the final column width.
+        {
+          updateDimensionProperties: {
+            range: { sheetId: TURN_SCOPE_SHEET_ID, dimension: 'COLUMNS', startIndex: 3, endIndex: 4 },
+            properties: { pixelSize: 540 },
+            fields: 'pixelSize',
+          },
+        },
         {
           autoResizeDimensions: {
-            dimensions: { sheetId: TURN_SCOPE_SHEET_ID, dimension: 'COLUMNS', startIndex: 3, endIndex: 4 },
+            dimensions: { sheetId: TURN_SCOPE_SHEET_ID, dimension: 'ROWS', startIndex: firstDataRow, endIndex: totalsRow },
           },
         },
       ],

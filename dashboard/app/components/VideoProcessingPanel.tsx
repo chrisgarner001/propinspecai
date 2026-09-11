@@ -21,7 +21,7 @@ export default function VideoProcessingPanel({
   const [videos, setVideos] = useState<InspectionVideoRow[]>(initialVideos)
   const [running, setRunning] = useState(false)
   const [bannerError, setBannerError] = useState<string | null>(null)
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(true)
   const router = useRouter()
 
   const total = videos.length

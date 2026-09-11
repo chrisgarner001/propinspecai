@@ -1,6 +1,7 @@
 import { getSql } from '@/lib/db'
 import { updateSettings, createVendor } from '@/app/actions'
 import AppShell from '@/app/components/AppShell'
+import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
 
@@ -113,6 +114,17 @@ export default async function SetupPage() {
             Create New Vendor
           </button>
         </form>
+      </div>
+
+      <div className="p-6 max-w-xl border-t border-border">
+        <div className={labelClass}>Cost Book</div>
+        <div className={`${helpClass} mb-3`}>Reference pricing for materials and labor used across inspections.</div>
+        <Link
+          href="/cost-book"
+          className="inline-block bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-2 text-[13px] font-semibold"
+        >
+          Open Cost Book
+        </Link>
       </div>
     </AppShell>
   )

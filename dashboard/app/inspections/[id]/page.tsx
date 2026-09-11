@@ -44,6 +44,7 @@ type LineItem = {
   labor_cost: string | null
   vendor_estimated_cost: string | null
   tenant_charge: boolean
+  tenant_charge_amount: string | null
   tenant_approved: boolean
   is_manual_addition: boolean
   source_video_file: string | null
@@ -191,7 +192,7 @@ export default async function InspectionPage({
             role="row"
             className={`grid ${ROW_COLS} gap-2 px-3 py-2.5 border-b border-border`}
           >
-            {['Item', 'Condition', 'Assigned To', 'Materials', 'Labor (hrs)', 'Vendor Est.', 'Tenant Charge', 'Approve'].map(
+            {['Item', 'Condition', 'Assigned To', 'Materials', 'Labor (hrs)', 'Vendor Est.', 'Tenant Charge', 'Remove from Quote Sheet'].map(
               (h) => (
                 <div
                   key={h}
@@ -222,21 +223,15 @@ export default async function InspectionPage({
                 </button>
               </div>
               <div role="cell" className="min-w-0 space-y-1">
-                <input
-                  name={`room_area__${li.id}`}
-                  defaultValue={li.room_area}
-                  placeholder="Room/Area"
-                  title={li.room_area}
-                  className={`${miniField} text-[10px] uppercase tracking-wide text-text-muted`}
-                />
-                <div className="flex items-center gap-1.5">
-                  <input
-                    name={`item__${li.id}`}
-                    defaultValue={li.item}
-                    placeholder="Item"
-                    title={li.item}
-                    className={`${miniField} font-semibold`}
-                  />
+                <input type="hidden" name={`room_area__${li.id}`} value={li.room_area} />
+                <input type="hidden" name={`item__${li.id}`} value={li.item} />
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <div
+                    className="min-w-0 flex-1 truncate text-[12px] font-semibold"
+                    title={`${li.room_area} - ${li.item}`}
+                  >
+                    <span className="uppercase text-accent font-bold">{li.room_area}</span> - {li.item}
+                  </div>
                   {li.is_manual_addition && (
                     <span className="text-[11px] font-normal text-accent whitespace-nowrap">(added)</span>
                   )}
@@ -249,13 +244,19 @@ export default async function InspectionPage({
                   className={`${miniField} text-text-muted`}
                 />
                 <div className="border-l-2 border-border pl-2 space-y-1">
-                  <input
-                    name={`observed_evidence__${li.id}`}
-                    defaultValue={li.observed_evidence ?? ''}
-                    placeholder="Observed evidence"
-                    title={li.observed_evidence ?? ''}
-                    className={`${miniField} data-mono text-text-muted`}
-                  />
+                  <div className="group relative">
+                    <input
+                      name={`observed_evidence__${li.id}`}
+                      defaultValue={li.observed_evidence ?? ''}
+                      placeholder="Observed evidence"
+                      className={`${miniField} data-mono text-text-muted`}
+                    />
+                    {li.observed_evidence && (
+                      <div className="hidden group-hover:block absolute z-10 left-0 top-full mt-1 w-72 border border-border rounded-[var(--radius-md)] bg-surface shadow-lg p-2 text-[12px] text-text whitespace-pre-wrap break-words">
+                        {li.observed_evidence}
+                      </div>
+                    )}
+                  </div>
                   <EvidenceStill stillImageFile={li.still_image_file} />
                   {li.source_video_file && (
                     <VideoPopupLink filename={li.source_video_file} driveFileId={li.source_video_drive_file_id} />
@@ -285,7 +286,12 @@ export default async function InspectionPage({
                 laborRate={laborRate}
                 vendorEstimatedCost={li.vendor_estimated_cost}
               />
-              <TenantChargeCheckboxes id={li.id} tenantCharge={li.tenant_charge} tenantApproved={li.tenant_approved} />
+              <TenantChargeCheckboxes
+                id={li.id}
+                tenantCharge={li.tenant_charge}
+                tenantChargeAmount={li.tenant_charge_amount}
+                removedFromQuoteSheet={li.tenant_approved}
+              />
             </div>
           ))}
         </div>

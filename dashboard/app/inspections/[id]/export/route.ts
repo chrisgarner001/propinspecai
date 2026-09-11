@@ -70,7 +70,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       li.labor_cost !== null ? labor : null,
       li.vendor_estimated_cost !== null ? vendorEst : null,
       total,
-      [li.tenant_charge ? 'Charge' : '', li.tenant_approved ? 'Approved' : ''].filter(Boolean).join(', '),
+      [li.tenant_charge ? 'Charge' : '', li.tenant_approved ? 'Removed from Quote Sheet' : ''].filter(Boolean).join(', '),
       li.recommended_action ?? '',
     ])
     for (const col of moneyCols) {

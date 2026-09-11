@@ -24,6 +24,7 @@ type LineItem = {
   observed_evidence: string | null
   recommended_action: string | null
   tenant_charge: boolean
+  tenant_charge_amount: string | null
   materials_cost: string | null
   labor_hours: string | null
   labor_cost: string | null
@@ -52,7 +53,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const lineItems = (await sql`
     select room_area, item, condition, observed_evidence, recommended_action,
-      tenant_charge, materials_cost, labor_hours, labor_cost
+      tenant_charge, tenant_charge_amount, materials_cost, labor_hours, labor_cost
     from line_items
     where inspection_id = ${id}
     order by room_area, created_at
@@ -160,6 +161,23 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     doc.y += 4
   }
 
+  // Diagonal, semi-transparent stamp over any row the reviewer marked
+  // "Tenant Charge" -- makes charged items visually obvious when skimming
+  // the full checklist, not just in the separate itemized-charges section.
+  function drawTenantChargeWatermark(rowY: number, rowHeight: number) {
+    const centerX = (colItem + PAGE_WIDTH - PAGE_MARGIN) / 2
+    const centerY = rowY + rowHeight / 2
+    doc.save()
+    doc.opacity(0.25)
+    doc.rotate(-12, { origin: [centerX, centerY] })
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(13)
+      .fillColor('#c0392b')
+      .text('TENANT CHARGE', centerX - 90, centerY - 7, { width: 180, align: 'center' })
+    doc.restore()
+  }
+
   function drawItemRow(li: LineItem) {
     const comments = [li.observed_evidence, li.recommended_action].filter(Boolean).join(' — ')
     const commentsHeight = doc.heightOfString(comments || '', { width: colWidth })
@@ -171,6 +189,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     doc.text(li.item, colItem, rowY, { width: colStatus - colItem - 6 })
     doc.text(CONDITION_DISPLAY[li.condition] ?? li.condition, colStatus, rowY)
     doc.text(comments, colComments, rowY, { width: colWidth })
+    if (li.tenant_charge) drawTenantChargeWatermark(rowY, rowHeight)
     doc.y = rowY + rowHeight + 6
     doc
       .moveTo(PAGE_MARGIN, doc.y - 3)
@@ -233,7 +252,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       const materials = Number(li.materials_cost ?? 0)
       const labor = Number(li.labor_cost ?? 0)
       const hours = li.labor_hours !== null ? Number(li.labor_hours) : null
-      const total = materials + labor
+      // tenant_charge_amount overrides the full materials+labor cost for
+      // cases where the tenant isn't responsible for the entire repair
+      // (e.g. normal wear covers part of it) -- null means "full cost",
+      // matching this report's behavior before the override existed.
+      const total = li.tenant_charge_amount !== null ? Number(li.tenant_charge_amount) : materials + labor
       grandTotal += total
 
       const rowHeight = hours !== null ? 24 : 16
@@ -245,7 +268,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       doc.text(li.room_area, chargeColRoom, rowY, { width: chargeColMaterials - chargeColRoom - 6 })
       doc.text(li.materials_cost !== null ? `$${materials.toFixed(2)}` : '—', chargeColMaterials, rowY)
       doc.text(li.labor_cost !== null ? `$${labor.toFixed(2)}` : '—', chargeColLabor, rowY)
-      doc.text(`$${total.toFixed(2)}`, chargeColTotal, rowY)
+      doc.text(`$${total.toFixed(2)}${li.tenant_charge_amount !== null ? '*' : ''}`, chargeColTotal, rowY)
       if (hours !== null) {
         // Reflect the hours x rate calculation, not just the resulting total.
         const rate = hours > 0 ? labor / hours : 0
@@ -271,6 +294,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     doc.text('Total Charged to Tenant:', chargeColLabor - 80, doc.y)
     doc.text(`$${grandTotal.toFixed(2)}`, chargeColTotal, doc.y)
     doc.y += 20
+
+    if (chargedItems.some((li) => li.tenant_charge_amount !== null)) {
+      doc
+        .font('Helvetica-Oblique')
+        .fontSize(8)
+        .text('* Adjusted: tenant is not being charged the full materials + labor cost for this item.', PAGE_MARGIN, doc.y)
+      doc.y += 12
+    }
   }
 
   ensureSpace(160)

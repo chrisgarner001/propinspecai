@@ -1,33 +1,62 @@
-// Tenant Charge and Approve are independent per-item flags (line_items.tenant_charge
-// / tenant_approved are separate booleans), so both can be checked at once. Plain
-// uncontrolled checkboxes -- no client state needed since nothing here is mutually
-// exclusive. Renders as a Fragment so its two divs land as direct grid items in the
-// parent row's CSS grid, matching the "Tenant Charge" / "Approve" columns.
+'use client'
+
+import { useState } from 'react'
+
+// Tenant Charge and Remove-from-Quote-Sheet are independent per-item flags,
+// so both can be checked at once. Renders as a Fragment so its divs land as
+// direct grid items in the parent row's CSS grid, matching the "Tenant
+// Charge" / "Remove from Quote Sheet" columns.
+//
+// removedFromQuoteSheet is stored in line_items.tenant_approved -- that
+// column originally meant tenant approval, but is unused for that purpose
+// (0 rows ever set it) and has been repurposed rather than adding a new
+// column. Checked = excluded from the generated Quote Sheet (see
+// turn-scope/route.ts's query filter).
+//
+// Tenant Charge is now a client component (not plain uncontrolled
+// checkboxes) so the charge-amount override field can enable/disable
+// live as the checkbox toggles, matching the LineItemAssignment pattern --
+// a server-rendered `disabled` only reflects the DB value at page load.
 export default function TenantChargeCheckboxes({
   id,
-  tenantCharge,
-  tenantApproved,
+  tenantCharge: initialTenantCharge,
+  tenantChargeAmount,
+  removedFromQuoteSheet,
 }: {
   id: string
   tenantCharge: boolean
-  tenantApproved: boolean
+  tenantChargeAmount: string | null
+  removedFromQuoteSheet: boolean
 }) {
+  const [tenantCharge, setTenantCharge] = useState(initialTenantCharge)
+
   return (
     <>
-      <div role="cell" className="min-w-0 flex justify-center">
+      <div role="cell" className="min-w-0 flex flex-col items-center gap-1">
         <input
           type="checkbox"
           name={`tenant_charge__${id}`}
-          defaultChecked={tenantCharge}
+          checked={tenantCharge}
+          onChange={(e) => setTenantCharge(e.target.checked)}
           className="h-4 w-4 cursor-pointer accent-accent"
+        />
+        <input
+          type="number"
+          step="1"
+          name={`tenant_charge_amount__${id}`}
+          defaultValue={tenantChargeAmount ?? ''}
+          disabled={!tenantCharge}
+          placeholder="Full cost"
+          title="Amount actually charged to the tenant, if less than the full materials + labor cost"
+          className="text-[11px] data-mono border border-border rounded-[var(--radius-sm)] px-1 py-0.5 w-16 min-w-0 bg-surface disabled:bg-surface-alt disabled:text-text-muted text-center"
         />
       </div>
       <div role="cell" className="min-w-0 flex justify-center">
         <input
           type="checkbox"
           name={`tenant_approved__${id}`}
-          defaultChecked={tenantApproved}
-          className="h-4 w-4 cursor-pointer accent-success"
+          defaultChecked={removedFromQuoteSheet}
+          className="h-4 w-4 cursor-pointer accent-error"
         />
       </div>
     </>
