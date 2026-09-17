@@ -21,7 +21,7 @@ type LineItem = {
   labor_cost: string | null
   materials_cost: string | null
   vendor_estimated_cost: string | null
-  quote_stage: string | null
+  stage_name: string | null
 }
 
 const PAGE_MARGIN = 50
@@ -41,9 +41,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const lineItems = (await sql`
     select li.room_area, li.item, li.observed_evidence, li.recommended_action, li.assigned_to,
       v.name as vendor_name, li.labor_hours, li.labor_cost, li.materials_cost, li.vendor_estimated_cost,
-      li.quote_stage
+      s.name as stage_name
     from line_items li
     left join vendors v on v.id = li.vendor_id
+    left join stages s on s.id = li.stage_id
     where li.inspection_id = ${id} and li.tenant_approved = false
     order by li.room_area, li.created_at
   `) as unknown as LineItem[]
@@ -158,7 +159,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     doc.text(hours !== null ? hours.toFixed(2) : '—', colHours, rowY)
     doc.text(materials !== null ? `$${materials.toFixed(2)}` : '—', colMaterials, rowY)
     doc.text(vendorQuote !== null ? `$${vendorQuote.toFixed(2)}` : '—', colVendorQuote, rowY)
-    doc.text(li.quote_stage ?? '—', colStage, rowY, { width: PAGE_WIDTH - PAGE_MARGIN - colStage })
+    doc.text(li.stage_name ?? '—', colStage, rowY, { width: PAGE_WIDTH - PAGE_MARGIN - colStage })
 
     if (hours !== null) grandHours += hours
     if (materials !== null) grandMaterials += materials

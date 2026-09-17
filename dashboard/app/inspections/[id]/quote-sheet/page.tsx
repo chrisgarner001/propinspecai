@@ -33,7 +33,7 @@ const miniField =
 // Nfr, so a long unbroken cell can't force its track wider than its share
 // and desync this row's columns from the header row's.
 const ROW_COLS =
-  'grid-cols-[minmax(0,0.8fr)_minmax(0,1.3fr)_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,0.9fr)]'
+  'grid-cols-[minmax(0,0.8fr)_minmax(0,1.3fr)_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.8fr)]'
 
 type LineItem = {
   id: string
@@ -46,13 +46,14 @@ type LineItem = {
   labor_hours: string | null
   materials_cost: string | null
   vendor_estimated_cost: string | null
-  quote_stage: string | null
+  stage_id: string | null
   supplier: string | null
   sku: string | null
   batch_number: number | null
 }
 
 type Vendor = { id: string; name: string }
+type Stage = { id: string; name: string; sort_order: number }
 
 export default async function QuoteSheetPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -63,22 +64,28 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
 
   const lineItems = (await sql`
     select id, room_area, item, observed_evidence, recommended_action, assigned_to, vendor_id,
-      labor_hours, materials_cost, vendor_estimated_cost, quote_stage, supplier, sku, batch_number
+      labor_hours, materials_cost, vendor_estimated_cost, stage_id, supplier, sku, batch_number
     from line_items
     where inspection_id = ${id} and tenant_approved = false
     order by room_area, created_at
   `) as unknown as LineItem[]
 
   const vendors = (await sql`select id, name from vendors order by name`) as unknown as Vendor[]
+  const stages = (await sql`select id, name, sort_order from stages order by sort_order`) as unknown as Stage[]
+  const stageById = new Map(stages.map((s) => [s.id, s]))
 
-  const batchSummary = [
+  const stageSummary = [
     ...lineItems.reduce((map, li) => {
-      if (li.batch_number === null) return map
-      if (!map.has(li.batch_number)) map.set(li.batch_number, 0)
-      map.set(li.batch_number, map.get(li.batch_number)! + 1)
+      const key = li.stage_id ?? 'unassigned'
+      if (!map.has(key)) map.set(key, 0)
+      map.set(key, map.get(key)! + 1)
       return map
-    }, new Map<number, number>()),
-  ].sort((a, b) => a[0] - b[0])
+    }, new Map<string, number>()),
+  ].sort(([a], [b]) => {
+    if (a === 'unassigned') return 1
+    if (b === 'unassigned') return -1
+    return (stageById.get(a)?.sort_order ?? 0) - (stageById.get(b)?.sort_order ?? 0)
+  })
 
   const [settings] = await sql`select gpm_labor_charge from settings where id = true`
   const laborRate = Number(settings?.gpm_labor_charge ?? 0)
@@ -116,10 +123,10 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
             </button>
           </form>
           <a
-            href={`/inspections/${id}/quote-sheet/batches`}
+            href={`/inspections/${id}/quote-sheet/stages`}
             className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
           >
-            Batch View
+            Stage View
           </a>
           <a
             href={`/inspections/${id}/quote-sheet/pdf`}
@@ -132,12 +139,12 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
         </div>
       </div>
 
-      {batchSummary.length > 0 && (
+      {stageSummary.length > 0 && (
         <div className="flex flex-wrap gap-x-4 gap-y-1 px-6 py-2 border-b border-border bg-surface-alt text-[12px]">
-          <span className="font-semibold text-text-muted uppercase tracking-wide text-[11px]">Batches</span>
-          {batchSummary.map(([batchNumber, count]) => (
-            <span key={batchNumber} className="text-text-muted">
-              Batch {batchNumber} ({count})
+          <span className="font-semibold text-text-muted uppercase tracking-wide text-[11px]">Stages</span>
+          {stageSummary.map(([key, count]) => (
+            <span key={key} className="text-text-muted">
+              {key === 'unassigned' ? 'Unassigned' : (stageById.get(key)?.name ?? 'Unknown stage')} ({count})
             </span>
           ))}
         </div>
@@ -147,7 +154,7 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
         <input type="hidden" name="inspection_id" value={id} />
         <div role="table">
           <div role="row" className={`grid ${ROW_COLS} gap-2 px-3 py-2.5 border-b border-border`}>
-            {['Area', 'Details', 'Comments', 'Vendor/GPM', 'Materials', 'Labor (hrs)', 'Vendor Quote', 'Stage', 'Supplier/SKU', 'Batch'].map((h) => (
+            {['Area', 'Details', 'Comments', 'Vendor/GPM', 'Materials', 'Labor (hrs)', 'Vendor Quote', 'Stage', 'Supplier/SKU'].map((h) => (
               <div key={h} role="columnheader" className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
                 {h}
               </div>
@@ -196,12 +203,14 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
                 vendorEstimatedCost={li.vendor_estimated_cost}
               />
               <div role="cell" className="min-w-0">
-                <input
-                  name={`quote_stage__${li.id}`}
-                  defaultValue={li.quote_stage ?? ''}
-                  placeholder="—"
-                  className={miniField}
-                />
+                <select name={`stage_id__${li.id}`} defaultValue={li.stage_id ?? ''} className={miniField}>
+                  <option value="">—</option>
+                  {stages.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div role="cell" className="min-w-0 space-y-1">
                 <input
@@ -215,17 +224,6 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
                   defaultValue={li.sku ?? ''}
                   placeholder="SKU"
                   className={`${miniField} data-mono`}
-                />
-              </div>
-              <div role="cell" className="min-w-0">
-                <input
-                  type="number"
-                  step="1"
-                  name={`batch_number__${li.id}`}
-                  defaultValue={li.batch_number ?? ''}
-                  placeholder="—"
-                  title="Batch number -- edit to move this item into a different batch, or a new number to start one"
-                  className={`${miniField} data-mono text-center`}
                 />
               </div>
             </div>

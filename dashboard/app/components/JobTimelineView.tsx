@@ -1,22 +1,19 @@
 'use client'
 
 import { useMemo, useRef, useState } from 'react'
-import { updateLineItemSchedule } from '@/app/actions'
+import { updateStageSchedule } from '@/app/actions'
 
-export type TimelineItem = {
-  id: string
-  room_area: string
-  item: string
-  assigned_to: string | null
-  vendor_id: string | null
+export type StageTimelineRow = {
+  id: string // inspection_stages.id
+  stageId: string
+  stageName: string
+  assigneeLabel: string
+  itemCount: number
   status: string
   scheduled_start: string | null // 'YYYY-MM-DD'
   scheduled_end: string | null
-  blocks_line_item_id: string | null
-  batch_number: number | null
+  blocks_inspection_stage_id: string | null
 }
-
-type Vendor = { id: string; name: string }
 
 const STATUS_OPTIONS = ['not_started', 'scheduled', 'in_progress', 'blocked', 'done', 'qc_needed']
 const STATUS_LABELS: Record<string, string> = {
@@ -32,7 +29,7 @@ type RowState = {
   status: string
   scheduled_start: string | null
   scheduled_end: string | null
-  blocks_line_item_id: string | null
+  blocks_inspection_stage_id: string | null
 }
 
 function toDate(s: string) {
@@ -57,32 +54,27 @@ function dayDiff(a: string, b: string) {
 // items get the loudest treatment on the page (a hatch fill in the existing
 // `error` token) since that's the signal a reviewer actually needs first --
 // the original mockup buried it in a 6px dot while assignee color was loudest.
+//
+// One row per Stage (not per line item) -- a stage can span many items
+// across many batches/vendors, so this shows the turn's phases, not its
+// individual tasks; per-item detail still lives on the Quote Sheet / Stage
+// View.
 export default function JobTimelineView({
   inspectionId,
-  lineItems,
-  vendors,
+  stageRows,
 }: {
   inspectionId: string
-  lineItems: TimelineItem[]
-  vendors: Vendor[]
+  stageRows: StageTimelineRow[]
 }) {
-  const vendorName = (vendorId: string | null) => vendors.find((v) => v.id === vendorId)?.name ?? 'Vendor'
-
-  function batchLabel(items: TimelineItem[]) {
-    const distinct = new Set(items.map((li) => (li.assigned_to === 'Outside Vendor' ? `vendor:${li.vendor_id}` : li.assigned_to)))
-    if (distinct.size > 1) return 'Mixed assignment'
-    const li = items[0]
-    return li.assigned_to === 'Outside Vendor' ? vendorName(li.vendor_id) : (li.assigned_to ?? 'Unassigned')
-  }
   const [rows, setRows] = useState<Record<string, RowState>>(() =>
     Object.fromEntries(
-      lineItems.map((li) => [
-        li.id,
+      stageRows.map((sr) => [
+        sr.id,
         {
-          status: li.status,
-          scheduled_start: li.scheduled_start,
-          scheduled_end: li.scheduled_end,
-          blocks_line_item_id: li.blocks_line_item_id,
+          status: sr.status,
+          scheduled_start: sr.scheduled_start,
+          scheduled_end: sr.scheduled_end,
+          blocks_inspection_stage_id: sr.blocks_inspection_stage_id,
         },
       ]),
     ),
@@ -93,10 +85,10 @@ export default function JobTimelineView({
   const dragPreviewRef = useRef<{ start: string; end: string } | null>(null)
   const trackRef = useRef<HTMLDivElement | null>(null)
   const dragStateRef = useRef<
-    { id: string; startX: number; origStart: string; origEnd: string; status: string; blocksLineItemId: string | null } | null
+    { id: string; startX: number; origStart: string; origEnd: string; status: string; blocksId: string | null } | null
   >(null)
 
-  const itemsById = useMemo(() => new Map(lineItems.map((li) => [li.id, li])), [lineItems])
+  const stagesById = useMemo(() => new Map(stageRows.map((sr) => [sr.id, sr])), [stageRows])
 
   // Visible range: min/max across every scheduled date plus today, padded 2
   // days each side -- so nothing with a real date is ever silently
@@ -138,13 +130,13 @@ export default function JobTimelineView({
     const prev = rows[id]
     setRows((r) => ({ ...r, [id]: next }))
     setErrors((e) => ({ ...e, [id]: '' }))
-    const result = await updateLineItemSchedule({
+    const result = await updateStageSchedule({
       id,
       inspectionId,
       status: next.status,
       scheduledStart: next.scheduled_start,
       scheduledEnd: next.scheduled_end,
-      blocksLineItemId: next.blocks_line_item_id,
+      blocksInspectionStageId: next.blocks_inspection_stage_id,
     })
     if (result.error) {
       setRows((r) => ({ ...r, [id]: prev })) // revert -- no toast, matches DESIGN.md's no-toast status-change convention
@@ -166,11 +158,11 @@ export default function JobTimelineView({
     const startX = e.clientX
     const origStart = row.scheduled_start
     const origEnd = row.scheduled_end
-    // status/blocksLineItemId captured now, not read back from `rows` on
-    // pointerup -- nothing else can plausibly edit this same row's other
-    // fields mid-gesture in a single-user UI, and capturing avoids a stale-
-    // closure read of `rows` inside a listener set up once at drag-start.
-    dragStateRef.current = { id, startX, origStart, origEnd, status: row.status, blocksLineItemId: row.blocks_line_item_id }
+    // status/blocksId captured now, not read back from `rows` on pointerup --
+    // nothing else can plausibly edit this same row's other fields mid-
+    // gesture in a single-user UI, and capturing avoids a stale-closure read
+    // of `rows` inside a listener set up once at drag-start.
+    dragStateRef.current = { id, startX, origStart, origEnd, status: row.status, blocksId: row.blocks_inspection_stage_id }
     dragPreviewRef.current = { start: origStart, end: origEnd }
     setDraggingId(id)
     setDragPreview(dragPreviewRef.current)
@@ -204,7 +196,7 @@ export default function JobTimelineView({
       if (drag && preview && (preview.start !== drag.origStart || preview.end !== drag.origEnd)) {
         void commit(drag.id, {
           status: drag.status,
-          blocks_line_item_id: drag.blocksLineItemId,
+          blocks_inspection_stage_id: drag.blocksId,
           scheduled_start: preview.start,
           scheduled_end: preview.end,
         })
@@ -222,31 +214,6 @@ export default function JobTimelineView({
     el.classList.add('bg-accent-bg')
     setTimeout(() => el.classList.remove('bg-accent-bg'), 1200)
   }
-
-  // Grouped by batch (not room_area) so this view lines up with the Quote
-  // Sheet's Batch View -- batches, not rooms, are the unit that gets
-  // scheduled and dispatched as a whole.
-  const groups = useMemo(() => {
-    const batches = new Map<number, TimelineItem[]>()
-    const unbatched: TimelineItem[] = []
-    for (const li of lineItems) {
-      if (li.batch_number === null) {
-        unbatched.push(li)
-        continue
-      }
-      if (!batches.has(li.batch_number)) batches.set(li.batch_number, [])
-      batches.get(li.batch_number)!.push(li)
-    }
-    const ordered: { key: string; label: string; items: TimelineItem[] }[] = [...batches.entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([batchNumber, items]) => ({
-        key: `batch-${batchNumber}`,
-        label: `Batch ${batchNumber} — ${batchLabel(items)}`,
-        items,
-      }))
-    if (unbatched.length > 0) ordered.push({ key: 'unbatched', label: 'Unbatched', items: unbatched })
-    return ordered
-  }, [lineItems])
 
   return (
     <div className="relative">
@@ -273,117 +240,108 @@ export default function JobTimelineView({
         </div>
       </div>
 
-      {groups.map(({ key, label, items }) => (
-        <div key={key}>
-          <div className="flex items-center gap-2 px-6 pt-3 pb-1">
-            <span className="font-display font-bold text-[13px]">{label}</span>
-            <span className="data-mono text-[11px] text-text-muted">{items.length} item(s)</span>
-          </div>
-          {items.map((li) => {
-            const row = rows[li.id]
-            const isDragging = draggingId === li.id
-            const start = isDragging && dragPreview ? dragPreview.start : row.scheduled_start
-            const end = isDragging && dragPreview ? dragPreview.end : row.scheduled_end
-            const predecessor = row.blocks_line_item_id ? itemsById.get(row.blocks_line_item_id) : null
-            const otherItems = lineItems.filter((o) => o.id !== li.id)
+      {stageRows.map((sr) => {
+        const row = rows[sr.id]
+        const isDragging = draggingId === sr.id
+        const start = isDragging && dragPreview ? dragPreview.start : row.scheduled_start
+        const end = isDragging && dragPreview ? dragPreview.end : row.scheduled_end
+        const predecessor = row.blocks_inspection_stage_id ? stagesById.get(row.blocks_inspection_stage_id) : null
+        const otherStages = stageRows.filter((o) => o.id !== sr.id)
 
-            return (
-              <div
-                id={`timeline-row-${li.id}`}
-                key={li.id}
-                className="grid grid-cols-[280px_1fr] gap-2 px-6 py-2 border-b border-border items-center transition-colors"
-              >
-                <div className="min-w-0 pr-2 space-y-1">
-                  <div className="text-[10px] uppercase tracking-wide text-text-muted">{li.room_area}</div>
-                  <div className="font-semibold text-[13px] truncate">{li.item}</div>
-                  <div className="text-[11px] text-text-muted">
-                    {li.assigned_to === 'Outside Vendor' ? vendorName(li.vendor_id) : (li.assigned_to ?? '—')}
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <select
-                      value={row.status}
-                      onChange={(e) => commit(li.id, { ...row, status: e.target.value })}
-                      className={`text-[11px] border border-border rounded-[var(--radius-sm)] px-1 py-0.5 bg-surface ${
-                        row.status === 'blocked' ? 'text-error font-semibold' : 'text-text-muted'
-                      }`}
-                    >
-                      {STATUS_OPTIONS.map((s) => (
-                        <option key={s} value={s}>
-                          {STATUS_LABELS[s]}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="date"
-                      value={start ?? ''}
-                      onChange={(e) => commit(li.id, { ...row, scheduled_start: e.target.value || null })}
-                      className="data-mono text-[10px] border border-border rounded-[var(--radius-sm)] px-1 py-0.5 bg-surface w-[104px]"
-                      aria-label={`${li.item} scheduled start`}
-                    />
-                    <span className="text-[10px] text-text-muted">–</span>
-                    <input
-                      type="date"
-                      value={end ?? ''}
-                      onChange={(e) => commit(li.id, { ...row, scheduled_end: e.target.value || null })}
-                      className="data-mono text-[10px] border border-border rounded-[var(--radius-sm)] px-1 py-0.5 bg-surface w-[104px]"
-                      aria-label={`${li.item} scheduled end`}
-                    />
-                  </div>
-                  <select
-                    value={row.blocks_line_item_id ?? ''}
-                    onChange={(e) => commit(li.id, { ...row, blocks_line_item_id: e.target.value || null })}
-                    className="text-[10px] border border-border rounded-[var(--radius-sm)] px-1 py-0.5 bg-surface w-full max-w-[200px]"
-                    aria-label={`${li.item} blocked by`}
-                  >
-                    <option value="">— not blocked —</option>
-                    {otherItems.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.room_area} / {o.item}
-                      </option>
-                    ))}
-                  </select>
-                  {predecessor && (
-                    <button
-                      type="button"
-                      onClick={() => highlightRow(predecessor.id)}
-                      className="text-[10px] text-text-muted border border-border rounded-[var(--radius-sm)] px-1.5 py-0.5 bg-surface hover:bg-surface-alt hover:border-text-muted w-fit block"
-                    >
-                      ← blocked by: {predecessor.item}
-                    </button>
-                  )}
-                  {errors[li.id] && <div className="text-[10px] text-error">{errors[li.id]}</div>}
-                </div>
-
-                <div className="relative h-8 rounded-[var(--radius-sm)] bg-[repeating-linear-gradient(90deg,transparent,transparent_calc(10%-1px),var(--color-border)_calc(10%-1px),var(--color-border)_10%)]">
-                  {start && end ? (
-                    <div
-                      onPointerDown={(e) => onBarPointerDown(e, li.id)}
-                      className={`absolute top-1 h-6 rounded-[var(--radius-sm)] flex items-center gap-1.5 px-2 text-[10px] font-medium text-white cursor-grab active:cursor-grabbing select-none ${
-                        row.status === 'blocked'
-                          ? 'bg-[repeating-linear-gradient(45deg,var(--color-error),var(--color-error)_4px,#c74a41_4px,#c74a41_8px)]'
-                          : 'bg-text-muted'
-                      } ${isDragging ? 'outline outline-2 outline-accent outline-offset-1 shadow-md' : ''}`}
-                      style={{ left: `${pct(start)}%`, width: `${Math.max(pct(end) - pct(start), 3)}%`, minWidth: '78px' }}
-                    >
-                      <span className="data-mono whitespace-nowrap overflow-hidden text-ellipsis">
-                        {new Date(`${start}T00:00:00Z`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', timeZone: 'UTC' })}
-                        –
-                        {new Date(`${end}T00:00:00Z`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', timeZone: 'UTC' })}
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="absolute inset-y-1 left-0 right-0 border border-dashed border-border rounded-[var(--radius-sm)] flex items-center px-2">
-                      <span className="text-[11px] italic text-text-muted">Not scheduled</span>
-                    </div>
-                  )}
-                </div>
+        return (
+          <div
+            id={`timeline-row-${sr.id}`}
+            key={sr.id}
+            className="grid grid-cols-[280px_1fr] gap-2 px-6 py-2 border-b border-border items-center transition-colors"
+          >
+            <div className="min-w-0 pr-2 space-y-1">
+              <div className="font-semibold text-[13px] truncate">{sr.stageName}</div>
+              <div className="text-[11px] text-text-muted">
+                {sr.assigneeLabel} · <span className="data-mono">{sr.itemCount}</span> item(s)
               </div>
-            )
-          })}
-        </div>
-      ))}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <select
+                  value={row.status}
+                  onChange={(e) => commit(sr.id, { ...row, status: e.target.value })}
+                  className={`text-[11px] border border-border rounded-[var(--radius-sm)] px-1 py-0.5 bg-surface ${
+                    row.status === 'blocked' ? 'text-error font-semibold' : 'text-text-muted'
+                  }`}
+                >
+                  {STATUS_OPTIONS.map((s) => (
+                    <option key={s} value={s}>
+                      {STATUS_LABELS[s]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-1">
+                <input
+                  type="date"
+                  value={start ?? ''}
+                  onChange={(e) => commit(sr.id, { ...row, scheduled_start: e.target.value || null })}
+                  className="data-mono text-[10px] border border-border rounded-[var(--radius-sm)] px-1 py-0.5 bg-surface w-[104px]"
+                  aria-label={`${sr.stageName} scheduled start`}
+                />
+                <span className="text-[10px] text-text-muted">–</span>
+                <input
+                  type="date"
+                  value={end ?? ''}
+                  onChange={(e) => commit(sr.id, { ...row, scheduled_end: e.target.value || null })}
+                  className="data-mono text-[10px] border border-border rounded-[var(--radius-sm)] px-1 py-0.5 bg-surface w-[104px]"
+                  aria-label={`${sr.stageName} scheduled end`}
+                />
+              </div>
+              <select
+                value={row.blocks_inspection_stage_id ?? ''}
+                onChange={(e) => commit(sr.id, { ...row, blocks_inspection_stage_id: e.target.value || null })}
+                className="text-[10px] border border-border rounded-[var(--radius-sm)] px-1 py-0.5 bg-surface w-full max-w-[200px]"
+                aria-label={`${sr.stageName} blocked by`}
+              >
+                <option value="">— not blocked —</option>
+                {otherStages.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.stageName}
+                  </option>
+                ))}
+              </select>
+              {predecessor && (
+                <button
+                  type="button"
+                  onClick={() => highlightRow(predecessor.id)}
+                  className="text-[10px] text-text-muted border border-border rounded-[var(--radius-sm)] px-1.5 py-0.5 bg-surface hover:bg-surface-alt hover:border-text-muted w-fit block"
+                >
+                  ← blocked by: {predecessor.stageName}
+                </button>
+              )}
+              {errors[sr.id] && <div className="text-[10px] text-error">{errors[sr.id]}</div>}
+            </div>
+
+            <div className="relative h-8 rounded-[var(--radius-sm)] bg-[repeating-linear-gradient(90deg,transparent,transparent_calc(10%-1px),var(--color-border)_calc(10%-1px),var(--color-border)_10%)]">
+              {start && end ? (
+                <div
+                  onPointerDown={(e) => onBarPointerDown(e, sr.id)}
+                  className={`absolute top-1 h-6 rounded-[var(--radius-sm)] flex items-center gap-1.5 px-2 text-[10px] font-medium text-white cursor-grab active:cursor-grabbing select-none ${
+                    row.status === 'blocked'
+                      ? 'bg-[repeating-linear-gradient(45deg,var(--color-error),var(--color-error)_4px,#c74a41_4px,#c74a41_8px)]'
+                      : 'bg-text-muted'
+                  } ${isDragging ? 'outline outline-2 outline-accent outline-offset-1 shadow-md' : ''}`}
+                  style={{ left: `${pct(start)}%`, width: `${Math.max(pct(end) - pct(start), 3)}%`, minWidth: '78px' }}
+                >
+                  <span className="data-mono whitespace-nowrap overflow-hidden text-ellipsis">
+                    {new Date(`${start}T00:00:00Z`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', timeZone: 'UTC' })}
+                    –
+                    {new Date(`${end}T00:00:00Z`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', timeZone: 'UTC' })}
+                  </span>
+                </div>
+              ) : (
+                <div className="absolute inset-y-1 left-0 right-0 border border-dashed border-border rounded-[var(--radius-sm)] flex items-center px-2">
+                  <span className="text-[11px] italic text-text-muted">Not scheduled</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

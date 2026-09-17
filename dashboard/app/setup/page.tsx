@@ -117,6 +117,17 @@ export default async function SetupPage() {
       </div>
 
       <div className="p-6 max-w-xl border-t border-border">
+        <div className={labelClass}>Stages</div>
+        <div className={`${helpClass} mb-3`}>The rehab/turn stages used on the Quote Sheet and Job Timeline, and their display order.</div>
+        <Link
+          href="/setup/stages"
+          className="inline-block bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-2 text-[13px] font-semibold"
+        >
+          Manage Stages
+        </Link>
+      </div>
+
+      <div className="p-6 max-w-xl border-t border-border">
         <div className={labelClass}>Cost Book</div>
         <div className={`${helpClass} mb-3`}>Reference pricing for materials and labor used across inspections.</div>
         <Link

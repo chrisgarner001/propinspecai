@@ -101,14 +101,12 @@ export async function updateQuoteSheetItems(formData: FormData) {
     const laborCost = laborHours !== null ? laborHours * laborRate : null
     const materialsCost = toNumberOrNull(formData.get(`materials_cost__${id}`))
     const vendorEstimatedCost = toNumberOrNull(formData.get(`vendor_estimated_cost__${id}`))
-    const quoteStageRaw = formData.get(`quote_stage__${id}`)
-    const quoteStage = quoteStageRaw ? String(quoteStageRaw) : null
+    const stageIdRaw = formData.get(`stage_id__${id}`)
+    const stageId = stageIdRaw ? String(stageIdRaw) : null
     const supplierRaw = formData.get(`supplier__${id}`)
     const supplier = supplierRaw ? String(supplierRaw) : null
     const skuRaw = formData.get(`sku__${id}`)
     const sku = skuRaw ? String(skuRaw) : null
-    const batchNumberRaw = toNumberOrNull(formData.get(`batch_number__${id}`))
-    const batchNumber = batchNumberRaw !== null ? Math.round(batchNumberRaw) : null
 
     await sql`
       update line_items
@@ -123,10 +121,9 @@ export async function updateQuoteSheetItems(formData: FormData) {
         labor_cost = ${laborCost},
         materials_cost = ${materialsCost},
         vendor_estimated_cost = ${vendorEstimatedCost},
-        quote_stage = ${quoteStage},
+        stage_id = ${stageId},
         supplier = ${supplier},
-        sku = ${sku},
-        batch_number = ${batchNumber}
+        sku = ${sku}
       where id = ${id}
     `
   }
@@ -134,57 +131,62 @@ export async function updateQuoteSheetItems(formData: FormData) {
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
 }
 
-// Auto-fills batch_number for whichever line items don't have one yet, by
-// CURRENT Assigned To / Vendor: one new batch number for every unbatched
-// "GPM Staff" item, and one new batch number per distinct vendor for every
-// unbatched "Outside Vendor" item that already has a vendor picked. Items
-// assigned to "Other", left unassigned, or "Outside Vendor" with no vendor
-// chosen yet are left unbatched -- there's no sensible single batch to put
-// them in.
+// Auto-fills batch_number for whichever staged line items don't have one
+// yet, grouped by (Stage, Assigned To / Vendor): one new batch number per
+// distinct Stage for GPM Staff items, and one new batch number per distinct
+// (Stage, Vendor) pair for Outside Vendor items that already have a vendor
+// picked. The same vendor doing work across two different Stages gets two
+// separate batches, not one -- each batch is a single work order for a
+// single stage of the turn. Items with no Stage set yet, assigned to
+// "Other", left unassigned, or "Outside Vendor" with no vendor chosen are
+// left unbatched -- there's no sensible single batch to put them in.
 //
-// Deliberately never touches an item that already has a batch_number --
-// batch_number is manually editable on the Quote Sheet (Regular View) so a
-// reviewer can freely reassign/split items (e.g. GPM items across two
-// techs, since there's no per-technician concept yet); re-running this
-// button must not clobber that.
+// Deliberately never touches an item that already has a batch_number -- a
+// reviewer can still freely reassign/split items on the Quote Sheet by
+// clearing batch_number directly in the DB if needed; re-running this
+// button must not clobber existing batches.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, inspectionId) call site; formAction always passes the triggering form's FormData last
 export async function createBatches(inspectionId: string, _formData: FormData) {
   const sql = getSql()
 
   const items = await sql`
-    select id, assigned_to, vendor_id from line_items
-    where inspection_id = ${inspectionId} and tenant_approved = false and batch_number is null
+    select id, stage_id, assigned_to, vendor_id from line_items
+    where inspection_id = ${inspectionId} and tenant_approved = false and batch_number is null and stage_id is not null
   `
   if (items.length > 0) {
     const [{ max }] = await sql`select max(batch_number) as max from line_items where inspection_id = ${inspectionId}`
     let nextBatch = (max ?? 0) + 1
 
-    const gpmItemIds = items.filter((li) => li.assigned_to === 'GPM Staff').map((li) => li.id)
-    if (gpmItemIds.length > 0) {
-      await sql`update line_items set batch_number = ${nextBatch} where id in ${sql(gpmItemIds)}`
-      nextBatch++
+    const gpmGroups = new Map<string, string[]>()
+    const vendorGroups = new Map<string, string[]>()
+
+    for (const li of items) {
+      if (li.assigned_to === 'GPM Staff') {
+        if (!gpmGroups.has(li.stage_id)) gpmGroups.set(li.stage_id, [])
+        gpmGroups.get(li.stage_id)!.push(li.id)
+      } else if (li.assigned_to === 'Outside Vendor' && li.vendor_id !== null) {
+        const key = `${li.stage_id}:${li.vendor_id}`
+        if (!vendorGroups.has(key)) vendorGroups.set(key, [])
+        vendorGroups.get(key)!.push(li.id)
+      }
     }
 
-    const vendorIds = [
-      ...new Set(
-        items.filter((li) => li.assigned_to === 'Outside Vendor' && li.vendor_id !== null).map((li) => li.vendor_id as string),
-      ),
-    ]
-    for (const vendorId of vendorIds) {
-      const vendorItemIds = items
-        .filter((li) => li.assigned_to === 'Outside Vendor' && li.vendor_id === vendorId)
-        .map((li) => li.id)
-      await sql`update line_items set batch_number = ${nextBatch} where id in ${sql(vendorItemIds)}`
+    for (const ids of gpmGroups.values()) {
+      await sql`update line_items set batch_number = ${nextBatch} where id in ${sql(ids)}`
+      nextBatch++
+    }
+    for (const ids of vendorGroups.values()) {
+      await sql`update line_items set batch_number = ${nextBatch} where id in ${sql(ids)}`
       nextBatch++
     }
   }
 
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
-  revalidatePath(`/inspections/${inspectionId}/quote-sheet/batches`)
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet/stages`)
 }
 
 // STAND-IN for the real PropertyWare integration -- there's no PW API
-// access/docs available yet (see quote-sheet/batches/page.tsx). Records a
+// access/docs available yet (see quote-sheet/stages/page.tsx). Records a
 // manually-typed PW work order number against this batch instead of
 // actually calling PropertyWare's API. Swapping in the real call later
 // means replacing the body of this function; callers/UI stay the same.
@@ -201,7 +203,7 @@ export async function sendBatchToPW(inspectionId: string, batchNumber: number, f
     do update set pw_work_order_number = excluded.pw_work_order_number, sent_to_pw_at = excluded.sent_to_pw_at
   `
 
-  revalidatePath(`/inspections/${inspectionId}/quote-sheet/batches`)
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet/stages`)
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, id, inspectionId) call site; formAction always passes the triggering form's FormData last
@@ -297,6 +299,58 @@ export async function updateLineItemSchedule(input: {
   return {}
 }
 
+// Same shape as updateLineItemSchedule above, but for the Job Timeline's
+// per-Stage rows (inspection_stages) instead of per-line-item rows -- see
+// 0020_inspection_stages.sql. A stage can span many line items across many
+// batches/vendors, so scheduling lives at the (inspection, stage) grain now.
+export async function updateStageSchedule(input: {
+  id: string
+  inspectionId: string
+  status: string
+  scheduledStart: string | null
+  scheduledEnd: string | null
+  blocksInspectionStageId: string | null
+}): Promise<{ error?: string }> {
+  const sql = getSql()
+  const { id, inspectionId, blocksInspectionStageId } = input
+
+  if (blocksInspectionStageId !== null) {
+    if (blocksInspectionStageId === id) {
+      return { error: 'A stage cannot block itself.' }
+    }
+    const rows = (await sql`
+      select id, blocks_inspection_stage_id from inspection_stages where inspection_id = ${inspectionId}
+    `) as { id: string; blocks_inspection_stage_id: string | null }[]
+    const nextBlock = new Map(rows.map((r) => [r.id, r.blocks_inspection_stage_id]))
+    // Walk the chain starting from the proposed predecessor; if it ever
+    // leads back to `id`, setting this link would create a cycle. `seen`
+    // guards against looping forever if a cycle already exists elsewhere.
+    let cursor: string | null = blocksInspectionStageId
+    const seen = new Set<string>()
+    while (cursor) {
+      if (cursor === id) {
+        return { error: 'That would create a scheduling dependency cycle.' }
+      }
+      if (seen.has(cursor)) break
+      seen.add(cursor)
+      cursor = nextBlock.get(cursor) ?? null
+    }
+  }
+
+  await sql`
+    update inspection_stages
+    set
+      status = ${input.status},
+      scheduled_start = ${input.scheduledStart},
+      scheduled_end = ${input.scheduledEnd},
+      blocks_inspection_stage_id = ${blocksInspectionStageId}
+    where id = ${id}
+  `
+
+  revalidatePath(`/inspections/${inspectionId}/timeline`)
+  return {}
+}
+
 export async function addLineItem(formData: FormData) {
   const sql = getSql()
   const inspectionId = String(formData.get('inspection_id'))
@@ -370,6 +424,57 @@ export async function createVendor(formData: FormData) {
   await sql`insert into vendors (name) values (${name}) on conflict (name) do nothing`
 
   revalidatePath('/setup')
+}
+
+export async function createStage(formData: FormData) {
+  const sql = getSql()
+  const name = String(formData.get('name') ?? '').trim()
+  if (!name) return
+
+  const [{ max }] = await sql`select max(sort_order) as max from stages`
+  await sql`insert into stages (name, sort_order) values (${name}, ${(max ?? 0) + 1}) on conflict (name) do nothing`
+
+  revalidatePath('/setup/stages')
+}
+
+export async function updateStageName(stageId: string, formData: FormData) {
+  const sql = getSql()
+  const name = String(formData.get('name') ?? '').trim()
+  if (!name) return
+
+  await sql`update stages set name = ${name} where id = ${stageId}`
+
+  revalidatePath('/setup/stages')
+}
+
+// Swaps this stage's sort_order with its immediate neighbor's -- the
+// simplest reorder primitive that works as long as sort_order stays a
+// dense, gap-free ranking (which every write path here preserves).
+async function swapStageOrder(stageId: string, direction: 'up' | 'down') {
+  const sql = getSql()
+  const stages = await sql`select id, sort_order from stages order by sort_order`
+  const idx = stages.findIndex((s) => s.id === stageId)
+  if (idx === -1) return
+
+  const neighborIdx = direction === 'up' ? idx - 1 : idx + 1
+  if (neighborIdx < 0 || neighborIdx >= stages.length) return
+
+  const current = stages[idx]
+  const neighbor = stages[neighborIdx]
+  await sql`update stages set sort_order = ${neighbor.sort_order} where id = ${current.id}`
+  await sql`update stages set sort_order = ${current.sort_order} where id = ${neighbor.id}`
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, stageId) call site; formAction always passes the triggering form's FormData last
+export async function moveStageUp(stageId: string, _formData: FormData) {
+  await swapStageOrder(stageId, 'up')
+  revalidatePath('/setup/stages')
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, stageId) call site; formAction always passes the triggering form's FormData last
+export async function moveStageDown(stageId: string, _formData: FormData) {
+  await swapStageOrder(stageId, 'down')
+  revalidatePath('/setup/stages')
 }
 
 export async function updateSettings(formData: FormData) {
