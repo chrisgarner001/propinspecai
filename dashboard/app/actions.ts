@@ -450,6 +450,12 @@ export async function updateStageName(stageId: string, formData: FormData) {
 // Swaps this stage's sort_order with its immediate neighbor's -- the
 // simplest reorder primitive that works as long as sort_order stays a
 // dense, gap-free ranking (which every write path here preserves).
+//
+// sort_order has a UNIQUE constraint, so writing the neighbor's value
+// directly into the current row collides with the neighbor's own
+// still-current value (the swap hasn't happened yet) and the whole thing
+// fails with a unique-violation. Bouncing through -1 (outside the valid
+// 1..N range, never otherwise used) avoids that collision at every step.
 async function swapStageOrder(stageId: string, direction: 'up' | 'down') {
   const sql = getSql()
   const stages = await sql`select id, sort_order from stages order by sort_order`
@@ -461,8 +467,11 @@ async function swapStageOrder(stageId: string, direction: 'up' | 'down') {
 
   const current = stages[idx]
   const neighbor = stages[neighborIdx]
-  await sql`update stages set sort_order = ${neighbor.sort_order} where id = ${current.id}`
-  await sql`update stages set sort_order = ${current.sort_order} where id = ${neighbor.id}`
+  await sql.begin(async (tx) => {
+    await tx`update stages set sort_order = -1 where id = ${current.id}`
+    await tx`update stages set sort_order = ${current.sort_order} where id = ${neighbor.id}`
+    await tx`update stages set sort_order = ${neighbor.sort_order} where id = ${current.id}`
+  })
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, stageId) call site; formAction always passes the triggering form's FormData last

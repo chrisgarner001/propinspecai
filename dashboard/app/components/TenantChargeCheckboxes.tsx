@@ -47,7 +47,7 @@ export default function TenantChargeCheckboxes({
         {tenantCharge && (
           <input
             type="number"
-            step="1"
+            step="0.01"
             name={`tenant_charge_amount__${id}`}
             defaultValue={tenantChargeAmount ?? defaultTotal}
             title="Amount actually charged to the tenant, if less than the full materials + labor cost"
