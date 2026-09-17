@@ -137,24 +137,34 @@ export default async function QuoteSheetStagesPage({ params }: { params: Promise
                 <span className="text-[13px] text-text-muted">{assigneeLabel(items)}</span>
                 <span className="data-mono text-[11px] text-text-muted">{items.length} item(s)</span>
               </div>
-              {meta?.pw_work_order_number ? (
-                <div className="text-[12px] font-semibold text-success">PW WO# {meta.pw_work_order_number}</div>
-              ) : (
-                <form action={sendBatchToPW.bind(null, id, batchNumber)} className="flex items-center gap-2">
-                  <input
-                    name="pw_work_order_number"
-                    required
-                    placeholder="PW work order #"
-                    className="text-[12px] border border-border rounded-[var(--radius-sm)] px-2 py-1 bg-surface w-36"
-                  />
-                  <button
-                    type="submit"
-                    className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap"
-                  >
-                    Send to PW
-                  </button>
-                </form>
-              )}
+              <div className="flex items-center gap-2">
+                <a
+                  href={`/inspections/${id}/quote-sheet/stages/${batchNumber}/pdf`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap"
+                >
+                  Take-Off Sheet
+                </a>
+                {meta?.pw_work_order_number ? (
+                  <div className="text-[12px] font-semibold text-success">PW WO# {meta.pw_work_order_number}</div>
+                ) : (
+                  <form action={sendBatchToPW.bind(null, id, batchNumber)} className="flex items-center gap-2">
+                    <input
+                      name="pw_work_order_number"
+                      required
+                      placeholder="PW work order #"
+                      className="text-[12px] border border-border rounded-[var(--radius-sm)] px-2 py-1 bg-surface w-36"
+                    />
+                    <button
+                      type="submit"
+                      className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap"
+                    >
+                      Send to PW
+                    </button>
+                  </form>
+                )}
+              </div>
             </div>
             <table className="w-full text-[13px] border-collapse">
               <tbody>
