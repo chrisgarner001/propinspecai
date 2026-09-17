@@ -8,11 +8,15 @@ export type TimelineItem = {
   room_area: string
   item: string
   assigned_to: string | null
+  vendor_id: string | null
   status: string
   scheduled_start: string | null // 'YYYY-MM-DD'
   scheduled_end: string | null
   blocks_line_item_id: string | null
+  batch_number: number | null
 }
+
+type Vendor = { id: string; name: string }
 
 const STATUS_OPTIONS = ['not_started', 'scheduled', 'in_progress', 'blocked', 'done', 'qc_needed']
 const STATUS_LABELS: Record<string, string> = {
@@ -56,10 +60,20 @@ function dayDiff(a: string, b: string) {
 export default function JobTimelineView({
   inspectionId,
   lineItems,
+  vendors,
 }: {
   inspectionId: string
   lineItems: TimelineItem[]
+  vendors: Vendor[]
 }) {
+  const vendorName = (vendorId: string | null) => vendors.find((v) => v.id === vendorId)?.name ?? 'Vendor'
+
+  function batchLabel(items: TimelineItem[]) {
+    const distinct = new Set(items.map((li) => (li.assigned_to === 'Outside Vendor' ? `vendor:${li.vendor_id}` : li.assigned_to)))
+    if (distinct.size > 1) return 'Mixed assignment'
+    const li = items[0]
+    return li.assigned_to === 'Outside Vendor' ? vendorName(li.vendor_id) : (li.assigned_to ?? 'Unassigned')
+  }
   const [rows, setRows] = useState<Record<string, RowState>>(() =>
     Object.fromEntries(
       lineItems.map((li) => [
@@ -209,13 +223,29 @@ export default function JobTimelineView({
     setTimeout(() => el.classList.remove('bg-accent-bg'), 1200)
   }
 
+  // Grouped by batch (not room_area) so this view lines up with the Quote
+  // Sheet's Batch View -- batches, not rooms, are the unit that gets
+  // scheduled and dispatched as a whole.
   const groups = useMemo(() => {
-    const map = new Map<string, TimelineItem[]>()
+    const batches = new Map<number, TimelineItem[]>()
+    const unbatched: TimelineItem[] = []
     for (const li of lineItems) {
-      if (!map.has(li.room_area)) map.set(li.room_area, [])
-      map.get(li.room_area)!.push(li)
+      if (li.batch_number === null) {
+        unbatched.push(li)
+        continue
+      }
+      if (!batches.has(li.batch_number)) batches.set(li.batch_number, [])
+      batches.get(li.batch_number)!.push(li)
     }
-    return map
+    const ordered: { key: string; label: string; items: TimelineItem[] }[] = [...batches.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([batchNumber, items]) => ({
+        key: `batch-${batchNumber}`,
+        label: `Batch ${batchNumber} — ${batchLabel(items)}`,
+        items,
+      }))
+    if (unbatched.length > 0) ordered.push({ key: 'unbatched', label: 'Unbatched', items: unbatched })
+    return ordered
   }, [lineItems])
 
   return (
@@ -243,10 +273,11 @@ export default function JobTimelineView({
         </div>
       </div>
 
-      {[...groups.entries()].map(([room, items]) => (
-        <div key={room}>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-text-muted px-6 pt-3 pb-1">
-            {room}
+      {groups.map(({ key, label, items }) => (
+        <div key={key}>
+          <div className="flex items-center gap-2 px-6 pt-3 pb-1">
+            <span className="font-display font-bold text-[13px]">{label}</span>
+            <span className="data-mono text-[11px] text-text-muted">{items.length} item(s)</span>
           </div>
           {items.map((li) => {
             const row = rows[li.id]
@@ -263,8 +294,11 @@ export default function JobTimelineView({
                 className="grid grid-cols-[280px_1fr] gap-2 px-6 py-2 border-b border-border items-center transition-colors"
               >
                 <div className="min-w-0 pr-2 space-y-1">
+                  <div className="text-[10px] uppercase tracking-wide text-text-muted">{li.room_area}</div>
                   <div className="font-semibold text-[13px] truncate">{li.item}</div>
-                  <div className="text-[11px] text-text-muted">{li.assigned_to ?? '—'}</div>
+                  <div className="text-[11px] text-text-muted">
+                    {li.assigned_to === 'Outside Vendor' ? vendorName(li.vendor_id) : (li.assigned_to ?? '—')}
+                  </div>
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <select
                       value={row.status}

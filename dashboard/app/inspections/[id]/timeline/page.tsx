@@ -24,31 +24,35 @@ export default async function JobTimelinePage({
   if (!inspection) notFound()
 
   const rows = await sql`
-    select id, room_area, item, assigned_to, status, scheduled_start, scheduled_end, blocks_line_item_id
+    select id, room_area, item, assigned_to, vendor_id, status, scheduled_start, scheduled_end, blocks_line_item_id, batch_number
     from line_items
     where inspection_id = ${id}
-    order by room_area, created_at
+    order by batch_number nulls last, room_area, created_at
   `
+
+  const vendors = (await sql`select id, name from vendors order by name`) as unknown as { id: string; name: string }[]
 
   const lineItems: TimelineItem[] = rows.map((r) => ({
     id: r.id,
     room_area: r.room_area,
     item: r.item,
     assigned_to: r.assigned_to,
+    vendor_id: r.vendor_id,
     status: r.status,
     scheduled_start: toDateInputValue(r.scheduled_start),
     scheduled_end: toDateInputValue(r.scheduled_end),
     blocks_line_item_id: r.blocks_line_item_id,
+    batch_number: r.batch_number,
   }))
 
   return (
-    <AppShell active="/" reviewerName="Jessica Zilka" title="Job Timeline" wide>
+    <AppShell active="/" reviewerName="Jessica Zilka" title="Job Timeline — Batch View" wide>
       <div className="px-6 py-3 border-b border-border">
         <div className="text-[13px] text-text-muted">
           {inspection.property_address} · Job <span className="data-mono">{inspection.job_number}</span>
         </div>
       </div>
-      <JobTimelineView inspectionId={id} lineItems={lineItems} />
+      <JobTimelineView inspectionId={id} lineItems={lineItems} vendors={vendors} />
     </AppShell>
   )
 }
