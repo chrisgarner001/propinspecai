@@ -1,6 +1,14 @@
 import { getSql } from '@/lib/db'
 import { notFound } from 'next/navigation'
-import { updateQuoteSheetItems, createBatches, duplicateLineItem, addLineItemSku, removeLineItemSku } from '@/app/actions'
+import {
+  updateQuoteSheetItems,
+  createBatches,
+  duplicateLineItem,
+  addLineItemSku,
+  removeLineItemSku,
+  addBulkMaterial,
+  removeBulkMaterial,
+} from '@/app/actions'
 import AppShell from '@/app/components/AppShell'
 import LineItemAssignment from '@/app/components/LineItemAssignment'
 import RemoveSectionControl from '@/app/components/RemoveSectionControl'
@@ -54,12 +62,14 @@ type LineItem = {
   stage_id: string | null
   supplier: string | null
   sku: string | null
+  sku_quantity: string | null
   batch_number: number | null
 }
 
 type Vendor = { id: string; name: string }
 type Stage = { id: string; name: string; sort_order: number }
-type AdditionalSku = { id: string; line_item_id: string; supplier: string | null; sku: string | null }
+type AdditionalSku = { id: string; line_item_id: string; supplier: string | null; sku: string | null; quantity: string | null }
+type BulkMaterial = { id: string; supplier: string | null; sku: string | null; quantity: string | null; notes: string | null }
 
 export default async function QuoteSheetPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -70,7 +80,7 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
 
   const lineItems = (await sql`
     select id, room_area, item, observed_evidence, recommended_action, assigned_to, vendor_id,
-      labor_hours, materials_cost, vendor_estimated_cost, stage_id, supplier, sku, batch_number
+      labor_hours, materials_cost, vendor_estimated_cost, stage_id, supplier, sku, sku_quantity, batch_number
     from line_items
     where inspection_id = ${id} and tenant_approved = false
     order by room_area, created_at
@@ -81,7 +91,7 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
   const stageById = new Map(stages.map((s) => [s.id, s]))
 
   const additionalSkus = (await sql`
-    select id, line_item_id, supplier, sku from line_item_additional_skus
+    select id, line_item_id, supplier, sku, quantity from line_item_additional_skus
     where line_item_id in ${sql(lineItems.length > 0 ? lineItems.map((li) => li.id) : [''])}
     order by created_at
   `) as unknown as AdditionalSku[]
@@ -90,6 +100,12 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
     if (!additionalSkusByItem.has(row.line_item_id)) additionalSkusByItem.set(row.line_item_id, [])
     additionalSkusByItem.get(row.line_item_id)!.push(row)
   }
+
+  const bulkMaterials = (await sql`
+    select id, supplier, sku, quantity, notes from inspection_bulk_materials
+    where inspection_id = ${id}
+    order by created_at
+  `) as unknown as BulkMaterial[]
 
   const stageSummary = [
     ...lineItems.reduce((map, li) => {
@@ -157,6 +173,14 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
             Stage View
           </a>
           <a
+            href={`/inspections/${id}/quote-sheet/materials-order/pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
+          >
+            Materials Order List
+          </a>
+          <a
             href={`/inspections/${id}/quote-sheet/pdf`}
             target="_blank"
             rel="noopener noreferrer"
@@ -177,6 +201,61 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
           ))}
         </div>
       )}
+
+      <div className="px-6 py-3 border-b border-border">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="font-semibold text-text-muted uppercase tracking-wide text-[11px]">Bulk Materials</span>
+          <span className="text-[11px] text-text-muted">
+            One purchase used across multiple line items (a contractor pack, a roll of screen material) — not tied
+            to any single item above.
+          </span>
+        </div>
+
+        {bulkMaterials.length > 0 && (
+          <div className="mb-2 space-y-1">
+            {bulkMaterials.map((bm) => (
+              <div key={bm.id} className="flex items-center gap-2 text-[12px]">
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="font-semibold">{bm.supplier ?? '—'}</span>{' '}
+                  <span className="data-mono text-text-muted">{bm.sku ?? ''}</span>
+                  {bm.quantity && <span className="text-text-muted"> · Qty {bm.quantity}</span>}
+                  {bm.notes && <span className="text-text-muted"> — {bm.notes}</span>}
+                </span>
+                <form action={removeBulkMaterial.bind(null, bm.id, id)}>
+                  <button type="submit" title="Remove" className="text-[11px] text-text-muted hover:text-error leading-none">
+                    ×
+                  </button>
+                </form>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <form action={addBulkMaterial.bind(null, id)} className="flex items-end gap-2 flex-wrap">
+          <div className="flex-1 min-w-[140px]">
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">Supplier</label>
+            <input name="bulk_supplier" className={miniField} />
+          </div>
+          <div className="flex-1 min-w-[140px]">
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">SKU</label>
+            <input name="bulk_sku" className={`${miniField} data-mono`} />
+          </div>
+          <div className="w-24">
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">Qty</label>
+            <input name="bulk_quantity" placeholder="e.g. 1 pack" className={miniField} />
+          </div>
+          <div className="flex-[2] min-w-[180px]">
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">Notes</label>
+            <input name="bulk_notes" placeholder="e.g. covers all outlet replacements" className={miniField} />
+          </div>
+          <button
+            type="submit"
+            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap"
+          >
+            Add Bulk Item
+          </button>
+        </form>
+      </div>
 
       <form action={updateQuoteSheetItems}>
         <input type="hidden" name="inspection_id" value={id} />
@@ -264,16 +343,26 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
                   placeholder="Supplier"
                   className={miniField}
                 />
-                <input
-                  name={`sku__${li.id}`}
-                  defaultValue={li.sku ?? ''}
-                  placeholder="SKU"
-                  className={`${miniField} data-mono`}
-                />
+                <div className="flex items-center gap-1">
+                  <input
+                    name={`sku__${li.id}`}
+                    defaultValue={li.sku ?? ''}
+                    placeholder="SKU"
+                    className={`${miniField} data-mono flex-1`}
+                  />
+                  <input
+                    name={`sku_quantity__${li.id}`}
+                    defaultValue={li.sku_quantity ?? ''}
+                    placeholder="Qty"
+                    title="Quantity"
+                    className={`${miniField} w-12 shrink-0`}
+                  />
+                </div>
                 {(additionalSkusByItem.get(li.id) ?? []).map((row) => (
                   <div key={row.id} className="flex items-center gap-1">
                     <span className="text-[11px] text-text-muted truncate flex-1" title={`${row.supplier ?? '—'} ${row.sku ?? ''}`}>
                       {row.supplier ?? '—'} <span className="data-mono">{row.sku ?? ''}</span>
+                      {row.quantity && <span> · Qty {row.quantity}</span>}
                     </span>
                     <button
                       type="submit"
@@ -296,6 +385,12 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
                       name={`new_sku__${li.id}`}
                       placeholder="SKU"
                       className={`${miniField} data-mono text-[11px] flex-1`}
+                    />
+                    <input
+                      name={`new_sku_quantity__${li.id}`}
+                      placeholder="Qty"
+                      title="Quantity"
+                      className={`${miniField} text-[11px] w-10 shrink-0`}
                     />
                     <button
                       type="submit"

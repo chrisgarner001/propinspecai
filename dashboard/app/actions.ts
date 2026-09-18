@@ -158,6 +158,8 @@ export async function updateQuoteSheetItems(formData: FormData) {
     const supplier = supplierRaw ? String(supplierRaw) : null
     const skuRaw = formData.get(`sku__${id}`)
     const sku = skuRaw ? String(skuRaw) : null
+    const skuQuantityRaw = formData.get(`sku_quantity__${id}`)
+    const skuQuantity = skuQuantityRaw ? String(skuQuantityRaw) : null
 
     await sql`
       update line_items
@@ -174,7 +176,8 @@ export async function updateQuoteSheetItems(formData: FormData) {
         vendor_estimated_cost = ${vendorEstimatedCost},
         stage_id = ${stageId},
         supplier = ${supplier},
-        sku = ${sku}
+        sku = ${sku},
+        sku_quantity = ${skuQuantity}
       where id = ${id}
     `
   }
@@ -313,9 +316,10 @@ export async function addLineItemSku(lineItemId: string, inspectionId: string, f
   const sql = getSql()
   const supplier = String(formData.get(`new_sku_supplier__${lineItemId}`) ?? '').trim() || null
   const sku = String(formData.get(`new_sku__${lineItemId}`) ?? '').trim() || null
+  const quantity = String(formData.get(`new_sku_quantity__${lineItemId}`) ?? '').trim() || null
   if (!supplier && !sku) return
 
-  await sql`insert into line_item_additional_skus (line_item_id, supplier, sku) values (${lineItemId}, ${supplier}, ${sku})`
+  await sql`insert into line_item_additional_skus (line_item_id, supplier, sku, quantity) values (${lineItemId}, ${supplier}, ${sku}, ${quantity})`
 
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
 }
@@ -324,6 +328,36 @@ export async function addLineItemSku(lineItemId: string, inspectionId: string, f
 export async function removeLineItemSku(id: string, inspectionId: string, _formData: FormData) {
   const sql = getSql()
   await sql`delete from line_item_additional_skus where id = ${id}`
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
+}
+
+// Bulk materials (0023_sku_quantities_and_bulk_materials.sql) -- a purchase
+// used across many line items in the same job (a contractor pack of outlets
+// covering 8 separate outlet-replacement rows, a roll of window screen
+// material), so it's scoped to the inspection as a whole rather than any one
+// line item. Same immediate-action shape as addLineItemSku/removeLineItemSku
+// above, for the same reason: a plain add-now/remove-now button is simpler
+// than folding a dynamic-length list into the bulk save.
+export async function addBulkMaterial(inspectionId: string, formData: FormData) {
+  const sql = getSql()
+  const supplier = String(formData.get('bulk_supplier') ?? '').trim() || null
+  const sku = String(formData.get('bulk_sku') ?? '').trim() || null
+  const quantity = String(formData.get('bulk_quantity') ?? '').trim() || null
+  const notes = String(formData.get('bulk_notes') ?? '').trim() || null
+  if (!supplier && !sku && !notes) return
+
+  await sql`
+    insert into inspection_bulk_materials (inspection_id, supplier, sku, quantity, notes)
+    values (${inspectionId}, ${supplier}, ${sku}, ${quantity}, ${notes})
+  `
+
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, id, inspectionId) call site; formAction always passes the triggering form's FormData last
+export async function removeBulkMaterial(id: string, inspectionId: string, _formData: FormData) {
+  const sql = getSql()
+  await sql`delete from inspection_bulk_materials where id = ${id}`
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
 }
 
