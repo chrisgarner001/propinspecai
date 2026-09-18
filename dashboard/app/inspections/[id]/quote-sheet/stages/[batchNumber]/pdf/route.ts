@@ -6,16 +6,17 @@ import path from 'node:path'
 // Worker/vendor take-off sheet for one Stage-assignment batch -- the
 // scope-of-work list a crew or vendor takes into the field, as opposed to
 // the owner-facing Quote Sheet PDF (which carries $ amounts). No costs here
-// on purpose: whoever is doing the work gets Room/Item/Comments/Supplier-SKU
-// only, headed by who it's for and when it's scheduled.
+// on purpose: whoever is doing the work gets Room/Item/Comments/Notes only,
+// headed by who it's for and when it's scheduled. Notes is a blank ruled
+// line, not a data field -- for the crew to jot something down on-site
+// (materials picked up, a wrinkle found, anything worth flagging back),
+// same paper-form convention as the signature lines on the Move-Out Report.
 
 type LineItem = {
   room_area: string
   item: string
   observed_evidence: string | null
   recommended_action: string | null
-  supplier: string | null
-  sku: string | null
 }
 
 type Assignment = {
@@ -44,7 +45,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   }
 
   const lineItems = (await sql`
-    select room_area, item, observed_evidence, recommended_action, supplier, sku
+    select room_area, item, observed_evidence, recommended_action
     from line_items
     where inspection_id = ${id} and tenant_approved = false and batch_number = ${batchNumber}
     order by room_area, created_at
@@ -154,8 +155,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   doc.y += 16
 
   const colItem = PAGE_MARGIN
-  const colSupplier = PAGE_WIDTH - PAGE_MARGIN - 150
-  const colWidth = colSupplier - colItem - 10
+  const colNotes = PAGE_WIDTH - PAGE_MARGIN - 150
+  const colWidth = colNotes - colItem - 10
 
   function ensureSpace(needed: number) {
     if (doc.y + needed > CONTENT_BOTTOM) {
@@ -171,7 +172,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const headerY = doc.y
     doc.font('Helvetica-Bold').fontSize(8)
     doc.text('Item / Comments', colItem, headerY)
-    doc.text('Supplier / SKU', colSupplier, headerY)
+    doc.text('Notes', colNotes, headerY)
     doc.y = headerY + 12
     doc.moveTo(PAGE_MARGIN, doc.y).lineTo(PAGE_WIDTH - PAGE_MARGIN, doc.y).lineWidth(1).stroke()
     doc.y += 4
@@ -179,7 +180,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   function drawItemRow(li: LineItem) {
     const comments = [li.observed_evidence, li.recommended_action].filter(Boolean).join(' — ')
-    const supplierSku = [li.supplier, li.sku].filter(Boolean).join(' / ')
     doc.font('Helvetica-Bold').fontSize(9)
     const itemHeight = doc.heightOfString(li.item, { width: colWidth })
     doc.font('Helvetica').fontSize(8)
@@ -193,7 +193,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       doc.font('Helvetica').fontSize(8).fillColor('#555555').text(comments, colItem, rowY + itemHeight + 2, { width: colWidth })
       doc.fillColor('#000000')
     }
-    doc.font('Helvetica').fontSize(9).text(supplierSku || '—', colSupplier, rowY, { width: PAGE_WIDTH - PAGE_MARGIN - colSupplier })
+    // Blank ruled line for the crew to write on, not a data field -- see
+    // comment at the top of this file.
+    const notesLineY = rowY + rowHeight - 4
+    doc
+      .moveTo(colNotes, notesLineY)
+      .lineTo(PAGE_WIDTH - PAGE_MARGIN, notesLineY)
+      .lineWidth(0.5)
+      .strokeColor('#999999')
+      .stroke()
+      .strokeColor('#000000')
 
     doc.y = rowY + rowHeight + 6
     doc

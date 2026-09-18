@@ -95,6 +95,7 @@ export default function DispatchBoard({
   const [daysOut, setDaysOut] = useState(15)
   const [dropHoverKey, setDropHoverKey] = useState<string | null>(null)
   const [resizePreview, setResizePreview] = useState<{ key: string; start: string; end: string } | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
   const dragKeyRef = useRef<string | null>(null)
   const headerRowRef = useRef<HTMLDivElement | null>(null)
 
@@ -112,6 +113,25 @@ export default function DispatchBoard({
   function draggingItem(): BoardItem | null {
     const key = dragKeyRef.current
     return key ? (items.find((i) => i.key === key) ?? null) : null
+  }
+
+  // The drag key lives in dragKeyRef, not dataTransfer -- but dataTransfer
+  // still needs *something* set via setData() in dragstart, or several
+  // browsers (Firefox reliably, some Chrome/Edge configurations too) refuse
+  // to treat the gesture as a real drag session at all: dragover/drop then
+  // never fire on any target, which looks exactly like "drag and drop isn't
+  // working" with no console error to point at.
+  function startDrag(e: React.DragEvent, key: string) {
+    dragKeyRef.current = key
+    setIsDragging(true)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', key)
+  }
+
+  function endDrag() {
+    dragKeyRef.current = null
+    setIsDragging(false)
+    setDropHoverKey(null)
   }
 
   // A Stage belongs to one job's line items -- dropping it on a different
@@ -308,8 +328,8 @@ export default function DispatchBoard({
               <div
                 key={i.key}
                 draggable
-                onDragStart={() => (dragKeyRef.current = i.key)}
-                onDragEnd={() => (dragKeyRef.current = null)}
+                onDragStart={(e) => startDrag(e, i.key)}
+                onDragEnd={endDrag}
                 className={`border border-dashed rounded-[var(--radius-sm)] px-2.5 py-2 cursor-grab active:cursor-grabbing ${
                   i.assignedTo === 'Outside Vendor' ? 'border-vendor bg-vendor-bg' : 'border-border bg-surface'
                 }`}
@@ -361,6 +381,14 @@ export default function DispatchBoard({
                       )}
                     </div>
 
+                    {/* Day-cells and bars are siblings, not parent/child, so a
+                        dragover event that lands on a bar never reaches the
+                        cell underneath it via bubbling -- and bars have no
+                        drop handler of their own. Without isDragging's
+                        pointer-events-none on bars below, any drop target
+                        already covered by an existing bar would silently
+                        reject every drop, which is worse the busier a row
+                        (crew rows especially) gets. */}
                     {columns.map((c, i) => {
                       const cellKey = `${row.key}:${c}`
                       return (
@@ -395,11 +423,11 @@ export default function DispatchBoard({
                         <div
                           key={item.key}
                           draggable
-                          onDragStart={() => (dragKeyRef.current = item.key)}
-                          onDragEnd={() => (dragKeyRef.current = null)}
+                          onDragStart={(e) => startDrag(e, item.key)}
+                          onDragEnd={endDrag}
                           className={`relative m-1 px-2 py-1 rounded-[var(--radius-sm)] border border-l-[3px] cursor-grab active:cursor-grabbing overflow-hidden ${
                             isVendor ? 'bg-vendor-bg border-border border-l-vendor' : 'bg-surface-alt border-border border-l-text-muted'
-                          } ${preview ? 'outline outline-2 outline-accent outline-offset-1' : ''}`}
+                          } ${preview ? 'outline outline-2 outline-accent outline-offset-1' : ''} ${isDragging ? 'pointer-events-none' : ''}`}
                           style={{ gridColumn: `${startCol} / ${endCol}`, gridRow: lane + 1, zIndex: 2 }}
                           title={`${item.stageName} — ${item.itemCount} item(s)`}
                         >
