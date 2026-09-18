@@ -134,6 +134,11 @@ export async function updateQuoteSheetItems(formData: FormData) {
   const laborRate = Number(settings?.gpm_labor_charge ?? 0)
 
   for (const id of ids) {
+    if (formData.get(`remove__${id}`) === '1') {
+      await sql`delete from line_items where id = ${id}`
+      continue
+    }
+
     const roomArea = String(formData.get(`room_area__${id}`) ?? '')
     const item = String(formData.get(`item__${id}`) ?? '')
     const observedEvidenceRaw = formData.get(`observed_evidence__${id}`)
@@ -263,20 +268,24 @@ export async function duplicateLineItem(id: string, inspectionId: string, _formD
   // the original in the (room_area, created_at) list ordering, directly
   // below it, rather than at the end of the room group.
   //
-  // status/scheduled_start/scheduled_end/blocks_line_item_id are deliberately
-  // OMITTED here, not copied from `original` -- a duplicate is a distinct,
-  // newly-noticed task and should start not_started/unscheduled, not
-  // inherit the original's job-tracking state. New line_items columns need
-  // a deliberate decision here, not silent inheritance via SELECT *.
-  // excluded_from_quote_sheet is likewise omitted (defaults to false) for the
-  // same reason -- a duplicate should appear in the Quote Sheet even if the
-  // original was excluded from it.
+  // status/scheduled_start/scheduled_end/blocks_line_item_id/batch_number are
+  // deliberately OMITTED here, not copied from `original` -- a duplicate is
+  // a distinct, newly-noticed task and should start not_started/unscheduled/
+  // unbatched, not inherit the original's job-tracking or dispatch state.
+  // New line_items columns need a deliberate decision here, not silent
+  // inheritance via SELECT *. excluded_from_quote_sheet is likewise omitted
+  // (defaults to false) for the same reason -- a duplicate should appear in
+  // the Quote Sheet even if the original was excluded from it. stage_id and
+  // supplier/sku ARE copied, unlike those: a duplicate exists because the
+  // same repair needs a second instance, which usually means the same Stage
+  // and the same materials source as a starting point.
   await sql`
     insert into line_items (
       inspection_id, room_area, item, condition, observed_evidence, assigned_to,
       trade_category, recommended_action, priority, materials_cost, labor_hours,
       labor_cost, vendor_estimated_cost, tenant_charge, tenant_charge_amount, tenant_approved, is_manual_addition,
-      source_timestamp, source_video_file, source_video_drive_file_id, still_image_file, vendor_id, created_at
+      source_timestamp, source_video_file, source_video_drive_file_id, still_image_file, vendor_id,
+      stage_id, supplier, sku, created_at
     )
     values (
       ${original.inspection_id}, ${original.room_area}, ${original.item}, ${original.condition},
@@ -285,11 +294,37 @@ export async function duplicateLineItem(id: string, inspectionId: string, _formD
       ${original.labor_hours}, ${original.labor_cost}, ${original.vendor_estimated_cost},
       ${original.tenant_charge}, ${original.tenant_charge_amount}, ${original.tenant_approved}, true,
       ${original.source_timestamp}, ${original.source_video_file}, ${original.source_video_drive_file_id}, ${original.still_image_file},
-      ${original.vendor_id}, ${original.created_at}::timestamptz + interval '1 millisecond'
+      ${original.vendor_id}, ${original.stage_id}, ${original.supplier}, ${original.sku},
+      ${original.created_at}::timestamptz + interval '1 millisecond'
     )
   `
 
   revalidatePath(`/inspections/${inspectionId}`)
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
+}
+
+// Additional Supplier/SKU rows beyond a line item's primary supplier/sku
+// (0016) -- for a repair that needs more than one part. An immediate action
+// (like duplicateLineItem above), not part of updateQuoteSheetItems' bulk
+// save: the number of these rows per item is dynamic, and parsing a
+// variable-length list back out of one big form's FormData is real added
+// complexity a plain insert-now button avoids entirely.
+export async function addLineItemSku(lineItemId: string, inspectionId: string, formData: FormData) {
+  const sql = getSql()
+  const supplier = String(formData.get(`new_sku_supplier__${lineItemId}`) ?? '').trim() || null
+  const sku = String(formData.get(`new_sku__${lineItemId}`) ?? '').trim() || null
+  if (!supplier && !sku) return
+
+  await sql`insert into line_item_additional_skus (line_item_id, supplier, sku) values (${lineItemId}, ${supplier}, ${sku})`
+
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, id, inspectionId) call site; formAction always passes the triggering form's FormData last
+export async function removeLineItemSku(id: string, inspectionId: string, _formData: FormData) {
+  const sql = getSql()
+  await sql`delete from line_item_additional_skus where id = ${id}`
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
 }
 
 // Called directly from the Job Timeline's client component (drag-end commit,

@@ -1,8 +1,9 @@
 import { getSql } from '@/lib/db'
 import { notFound } from 'next/navigation'
-import { updateQuoteSheetItems, createBatches } from '@/app/actions'
+import { updateQuoteSheetItems, createBatches, duplicateLineItem, addLineItemSku, removeLineItemSku } from '@/app/actions'
 import AppShell from '@/app/components/AppShell'
 import LineItemAssignment from '@/app/components/LineItemAssignment'
+import RemoveSectionControl from '@/app/components/RemoveSectionControl'
 import SaveChangesButton from '@/app/components/SaveChangesButton'
 import StatusSelect from '@/app/components/StatusSelect'
 
@@ -58,6 +59,7 @@ type LineItem = {
 
 type Vendor = { id: string; name: string }
 type Stage = { id: string; name: string; sort_order: number }
+type AdditionalSku = { id: string; line_item_id: string; supplier: string | null; sku: string | null }
 
 export default async function QuoteSheetPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -77,6 +79,17 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
   const vendors = (await sql`select id, name from vendors order by name`) as unknown as Vendor[]
   const stages = (await sql`select id, name, sort_order from stages order by sort_order`) as unknown as Stage[]
   const stageById = new Map(stages.map((s) => [s.id, s]))
+
+  const additionalSkus = (await sql`
+    select id, line_item_id, supplier, sku from line_item_additional_skus
+    where line_item_id in ${sql(lineItems.length > 0 ? lineItems.map((li) => li.id) : [''])}
+    order by created_at
+  `) as unknown as AdditionalSku[]
+  const additionalSkusByItem = new Map<string, AdditionalSku[]>()
+  for (const row of additionalSkus) {
+    if (!additionalSkusByItem.has(row.line_item_id)) additionalSkusByItem.set(row.line_item_id, [])
+    additionalSkusByItem.get(row.line_item_id)!.push(row)
+  }
 
   const stageSummary = [
     ...lineItems.reduce((map, li) => {
@@ -189,9 +202,19 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
               key={li.id}
               id={firstRowIdByStage.get(stageKey) === li.id ? stageAnchor(stageKey) : undefined}
               role="row"
-              className={`grid ${ROW_COLS} gap-2 items-start px-3 py-2.5 border-b border-border scroll-mt-4`}
+              className={`relative grid ${ROW_COLS} gap-2 items-start px-3 pt-2.5 pb-7 border-b border-border scroll-mt-4`}
             >
               <input type="hidden" name="ids" value={li.id} />
+              <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1.5">
+                <RemoveSectionControl id={li.id} />
+                <button
+                  type="submit"
+                  formAction={duplicateLineItem.bind(null, li.id, id)}
+                  className="text-[10px] font-semibold text-text-muted hover:text-accent border border-border hover:border-accent rounded-[var(--radius-sm)] px-1.5 py-0.5 bg-surface"
+                >
+                  Duplicate
+                </button>
+              </div>
               <div role="cell" className="min-w-0">
                 <input name={`room_area__${li.id}`} defaultValue={li.room_area} className={miniField} />
               </div>
@@ -247,6 +270,42 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
                   placeholder="SKU"
                   className={`${miniField} data-mono`}
                 />
+                {(additionalSkusByItem.get(li.id) ?? []).map((row) => (
+                  <div key={row.id} className="flex items-center gap-1">
+                    <span className="text-[11px] text-text-muted truncate flex-1" title={`${row.supplier ?? '—'} ${row.sku ?? ''}`}>
+                      {row.supplier ?? '—'} <span className="data-mono">{row.sku ?? ''}</span>
+                    </span>
+                    <button
+                      type="submit"
+                      formAction={removeLineItemSku.bind(null, row.id, id)}
+                      title="Remove this SKU"
+                      className="text-[11px] text-text-muted hover:text-error leading-none"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <div className="pt-1 border-t border-border space-y-1">
+                  <input
+                    name={`new_sku_supplier__${li.id}`}
+                    placeholder="+ Supplier"
+                    className={`${miniField} text-[11px]`}
+                  />
+                  <div className="flex items-center gap-1">
+                    <input
+                      name={`new_sku__${li.id}`}
+                      placeholder="SKU"
+                      className={`${miniField} data-mono text-[11px] flex-1`}
+                    />
+                    <button
+                      type="submit"
+                      formAction={addLineItemSku.bind(null, li.id, id)}
+                      className="text-[10px] font-semibold text-text-muted hover:text-accent border border-border hover:border-accent rounded-[var(--radius-sm)] px-1.5 py-1 bg-surface whitespace-nowrap"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
             )
