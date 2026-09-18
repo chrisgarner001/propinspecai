@@ -321,56 +321,43 @@ export async function updateLineItemSchedule(input: {
   return {}
 }
 
-// Same shape as updateLineItemSchedule above, but for the Job Timeline's
-// per-Stage rows (inspection_stages) instead of per-line-item rows -- see
-// 0020_inspection_stages.sql. A stage can span many line items across many
-// batches/vendors, so scheduling lives at the (inspection, stage) grain now.
-export async function updateStageSchedule(input: {
-  id: string
+// Backs the Dispatch Board's drag-and-drop (app/dispatch-board) -- placing a
+// Stage on a date, whether it already had a scheduled_start/end or is being
+// scheduled for the first time from the Unscheduled tray, is the same
+// upsert either way (inspection_stages is unique on (inspection_id,
+// stage_id) -- see 0020_inspection_stages.sql). `reassignTo` is only sent
+// when a Stage is dropped onto a different crew's row in Crew grouping --
+// it bulk-rewrites assigned_to/vendor_id on every line item under that
+// (inspection, stage) pair, which is a deliberate act (dragging a whole
+// Stage onto a vendor's lane means "this vendor now owns this Stage"), not
+// an incidental side effect of moving a date.
+export async function updateStagePlacement(input: {
   inspectionId: string
-  status: string
-  scheduledStart: string | null
-  scheduledEnd: string | null
-  blocksInspectionStageId: string | null
-}): Promise<{ error?: string }> {
+  stageId: string
+  scheduledStart: string
+  scheduledEnd: string
+  reassignTo?: { assignedTo: string; vendorId: string | null }
+}): Promise<void> {
   const sql = getSql()
-  const { id, inspectionId, blocksInspectionStageId } = input
 
-  if (blocksInspectionStageId !== null) {
-    if (blocksInspectionStageId === id) {
-      return { error: 'A stage cannot block itself.' }
+  await sql.begin(async (tx) => {
+    await tx`
+      insert into inspection_stages (inspection_id, stage_id, scheduled_start, scheduled_end)
+      values (${input.inspectionId}, ${input.stageId}, ${input.scheduledStart}, ${input.scheduledEnd})
+      on conflict (inspection_id, stage_id)
+      do update set scheduled_start = excluded.scheduled_start, scheduled_end = excluded.scheduled_end
+    `
+
+    if (input.reassignTo) {
+      await tx`
+        update line_items
+        set assigned_to = ${input.reassignTo.assignedTo}, vendor_id = ${input.reassignTo.vendorId}
+        where inspection_id = ${input.inspectionId} and stage_id = ${input.stageId}
+      `
     }
-    const rows = (await sql`
-      select id, blocks_inspection_stage_id from inspection_stages where inspection_id = ${inspectionId}
-    `) as { id: string; blocks_inspection_stage_id: string | null }[]
-    const nextBlock = new Map(rows.map((r) => [r.id, r.blocks_inspection_stage_id]))
-    // Walk the chain starting from the proposed predecessor; if it ever
-    // leads back to `id`, setting this link would create a cycle. `seen`
-    // guards against looping forever if a cycle already exists elsewhere.
-    let cursor: string | null = blocksInspectionStageId
-    const seen = new Set<string>()
-    while (cursor) {
-      if (cursor === id) {
-        return { error: 'That would create a scheduling dependency cycle.' }
-      }
-      if (seen.has(cursor)) break
-      seen.add(cursor)
-      cursor = nextBlock.get(cursor) ?? null
-    }
-  }
+  })
 
-  await sql`
-    update inspection_stages
-    set
-      status = ${input.status},
-      scheduled_start = ${input.scheduledStart},
-      scheduled_end = ${input.scheduledEnd},
-      blocks_inspection_stage_id = ${blocksInspectionStageId}
-    where id = ${id}
-  `
-
-  revalidatePath(`/inspections/${inspectionId}/timeline`)
-  return {}
+  revalidatePath('/dispatch-board')
 }
 
 export async function addLineItem(formData: FormData) {

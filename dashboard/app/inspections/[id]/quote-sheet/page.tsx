@@ -14,9 +14,9 @@ import StatusSelect from '@/app/components/StatusSelect'
 // so changing it here or there stays in sync everywhere.
 const QUOTE_SHEET_STATUS_OPTIONS = ['quote_sent', 'approved', 'scheduled', 'in_process', 'completed']
 
-// Job Timeline isn't needed until a quote is actually approved -- matches
-// the inspection detail page, which dropped its own Timeline link for the
-// same reason. Any status at or past "approved" counts.
+// The Dispatch Board isn't useful until a quote is actually approved --
+// nothing has a Stage assigned yet before then. Any status at or past
+// "approved" counts.
 const TIMELINE_VISIBLE_STATUSES = ['approved', 'scheduled', 'in_process', 'completed']
 
 // In-app replacement for the old Google-Sheets-based "Turn Scope" export --
@@ -108,10 +108,10 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
         <div className="flex items-center gap-2">
           {TIMELINE_VISIBLE_STATUSES.includes(inspection.status) && (
             <a
-              href={`/inspections/${id}/timeline`}
+              href={`/dispatch-board?job=${id}`}
               className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
             >
-              Job Timeline
+              Dispatch Board
             </a>
           )}
           <form action={createBatches.bind(null, id)}>
