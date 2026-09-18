@@ -25,9 +25,6 @@ type LineItem = {
   recommended_action: string | null
   tenant_charge: boolean
   tenant_charge_amount: string | null
-  materials_cost: string | null
-  labor_hours: string | null
-  labor_cost: string | null
 }
 
 const CONDITION_DISPLAY: Record<string, string> = {
@@ -53,7 +50,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const lineItems = (await sql`
     select room_area, item, condition, observed_evidence, recommended_action,
-      tenant_charge, tenant_charge_amount, materials_cost, labor_hours, labor_cost
+      tenant_charge, tenant_charge_amount
     from line_items
     where inspection_id = ${id}
     order by room_area, created_at
@@ -213,9 +210,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   }
 
   // --- Itemized Charges to Tenant ---
-  // Only rows the reviewer marked "Charge" (tenant_charge = true),
-  // with their Materials/Labor dollar amounts -- the deposit-disposition
-  // itemization, distinct from the full condition checklist above.
+  // Only rows the reviewer marked "Charge" (tenant_charge = true), at the
+  // dollar amount entered on the Tenant Chargeback Review screen
+  // (tenant_charge_amount) -- that screen is the sole source of this
+  // number now (see app/inspections/[id]/chargeback-review), independent
+  // of the Quote Sheet's materials_cost/labor_cost, which frequently isn't
+  // filled in yet within the 30-day disposition deadline this report exists
+  // to meet. This section previously fell back to materials+labor when no
+  // override was entered; that coupling is gone by design.
   doc.y += 10
   ensureSpace(30)
   doc.font('Helvetica-Bold').fontSize(12).text('Itemized Charges to Tenant', colItem, doc.y)
@@ -226,10 +228,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     doc.y += 16
   } else {
     const chargeColItem = PAGE_MARGIN
-    const chargeColRoom = PAGE_MARGIN + 200
-    const chargeColMaterials = PAGE_MARGIN + 320
-    const chargeColLabor = PAGE_MARGIN + 400
-    const chargeColTotal = PAGE_MARGIN + 470
+    const chargeColRoom = PAGE_MARGIN + 280
+    const chargeColTotal = PAGE_MARGIN + 420
 
     function drawChargeHeader() {
       ensureSpace(20)
@@ -237,9 +237,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       doc.font('Helvetica-Bold').fontSize(9)
       doc.text('Item', chargeColItem, headerY)
       doc.text('Room/Area', chargeColRoom, headerY)
-      doc.text('Materials', chargeColMaterials, headerY)
-      doc.text('Labor', chargeColLabor, headerY)
-      doc.text('Total', chargeColTotal, headerY)
+      doc.text('Amount Charged', chargeColTotal, headerY)
       doc.y = headerY + 14
       doc.moveTo(PAGE_MARGIN, doc.y).lineTo(PAGE_WIDTH - PAGE_MARGIN, doc.y).lineWidth(1.2).stroke()
       doc.y += 4
@@ -248,37 +246,20 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     drawChargeHeader()
 
     let grandTotal = 0
+    let hasPendingAmount = false
     for (const li of chargedItems) {
-      const materials = Number(li.materials_cost ?? 0)
-      const labor = Number(li.labor_cost ?? 0)
-      const hours = li.labor_hours !== null ? Number(li.labor_hours) : null
-      // tenant_charge_amount overrides the full materials+labor cost for
-      // cases where the tenant isn't responsible for the entire repair
-      // (e.g. normal wear covers part of it) -- null means "full cost",
-      // matching this report's behavior before the override existed.
-      const total = li.tenant_charge_amount !== null ? Number(li.tenant_charge_amount) : materials + labor
-      grandTotal += total
+      const total = li.tenant_charge_amount !== null ? Number(li.tenant_charge_amount) : null
+      if (total !== null) grandTotal += total
+      else hasPendingAmount = true
 
-      const rowHeight = hours !== null ? 24 : 16
+      const rowHeight = 16
       ensureSpace(rowHeight)
       if (doc.y === PAGE_MARGIN) drawChargeHeader()
       const rowY = doc.y
       doc.font('Helvetica').fontSize(9)
       doc.text(li.item, chargeColItem, rowY, { width: chargeColRoom - chargeColItem - 6 })
-      doc.text(li.room_area, chargeColRoom, rowY, { width: chargeColMaterials - chargeColRoom - 6 })
-      doc.text(li.materials_cost !== null ? `$${materials.toFixed(2)}` : '—', chargeColMaterials, rowY)
-      doc.text(li.labor_cost !== null ? `$${labor.toFixed(2)}` : '—', chargeColLabor, rowY)
-      doc.text(`$${total.toFixed(2)}${li.tenant_charge_amount !== null ? '*' : ''}`, chargeColTotal, rowY)
-      if (hours !== null) {
-        // Reflect the hours x rate calculation, not just the resulting total.
-        const rate = hours > 0 ? labor / hours : 0
-        doc
-          .font('Helvetica')
-          .fontSize(7)
-          .fillColor('#666666')
-          .text(`${hours.toFixed(2)} hrs @ $${rate.toFixed(2)}/hr`, chargeColLabor, rowY + 11)
-          .fillColor('#000000')
-      }
+      doc.text(li.room_area, chargeColRoom, rowY, { width: chargeColTotal - chargeColRoom - 6 })
+      doc.text(total !== null ? `$${total.toFixed(2)}` : 'Not yet entered', chargeColTotal, rowY)
       doc.y = rowY + rowHeight
       doc
         .moveTo(PAGE_MARGIN, doc.y - 3)
@@ -291,16 +272,18 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
     ensureSpace(20)
     doc.font('Helvetica-Bold').fontSize(10)
-    doc.text('Total Charged to Tenant:', chargeColLabor - 80, doc.y)
+    doc.text('Total Charged to Tenant:', chargeColRoom, doc.y)
     doc.text(`$${grandTotal.toFixed(2)}`, chargeColTotal, doc.y)
     doc.y += 20
 
-    if (chargedItems.some((li) => li.tenant_charge_amount !== null)) {
-      doc
-        .font('Helvetica-Oblique')
-        .fontSize(8)
-        .text('* Adjusted: tenant is not being charged the full materials + labor cost for this item.', PAGE_MARGIN, doc.y)
-      doc.y += 12
+    if (hasPendingAmount) {
+      const note =
+        'One or more charged items don’t have an amount entered yet in Tenant Chargeback Review -- shown above as "Not yet entered" and excluded from the total until it is.'
+      doc.font('Helvetica-Oblique').fontSize(8)
+      const noteHeight = doc.heightOfString(note, { width: PAGE_WIDTH - PAGE_MARGIN * 2 })
+      ensureSpace(noteHeight + 4)
+      doc.text(note, PAGE_MARGIN, doc.y, { width: PAGE_WIDTH - PAGE_MARGIN * 2 })
+      doc.y += noteHeight + 8
     }
   }
 
