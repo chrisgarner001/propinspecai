@@ -29,6 +29,10 @@ const TIMELINE_VISIBLE_STATUSES = ['approved', 'scheduled', 'in_process', 'compl
 const miniField =
   'text-[12px] border border-border rounded-[var(--radius-sm)] px-1.5 py-1 w-full bg-surface truncate'
 
+function stageAnchor(key: string) {
+  return `stage-${key}`
+}
+
 // See ROW_COLS comment on the main inspection page: minmax(0, Nfr), not bare
 // Nfr, so a long unbroken cell can't force its track wider than its share
 // and desync this row's columns from the header row's.
@@ -87,6 +91,17 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
     return (stageById.get(a)?.sort_order ?? 0) - (stageById.get(b)?.sort_order ?? 0)
   })
 
+  // The table itself isn't grouped by Stage (still ordered by room_area,
+  // same as every other row-editing page in the app) -- jumping to "a
+  // stage's section" means jumping to the first row in that order carrying
+  // this stage, same anchor technique as the main inspection page's
+  // room-area quick-jump links.
+  const firstRowIdByStage = new Map<string, string>()
+  for (const li of lineItems) {
+    const key = li.stage_id ?? 'unassigned'
+    if (!firstRowIdByStage.has(key)) firstRowIdByStage.set(key, li.id)
+  }
+
   const [settings] = await sql`select gpm_labor_charge from settings where id = true`
   const laborRate = Number(settings?.gpm_labor_charge ?? 0)
 
@@ -143,9 +158,9 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
         <div className="flex flex-wrap gap-x-4 gap-y-1 px-6 py-2 border-b border-border bg-surface-alt text-[12px]">
           <span className="font-semibold text-text-muted uppercase tracking-wide text-[11px]">Stages</span>
           {stageSummary.map(([key, count]) => (
-            <span key={key} className="text-text-muted">
+            <a key={key} href={`#${stageAnchor(key)}`} className="text-text-muted hover:text-accent hover:underline">
               {key === 'unassigned' ? 'Unassigned' : (stageById.get(key)?.name ?? 'Unknown stage')} ({count})
-            </span>
+            </a>
           ))}
         </div>
       )}
@@ -167,8 +182,15 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
             </div>
           )}
 
-          {lineItems.map((li) => (
-            <div key={li.id} role="row" className={`grid ${ROW_COLS} gap-2 items-start px-3 py-2.5 border-b border-border`}>
+          {lineItems.map((li) => {
+            const stageKey = li.stage_id ?? 'unassigned'
+            return (
+            <div
+              key={li.id}
+              id={firstRowIdByStage.get(stageKey) === li.id ? stageAnchor(stageKey) : undefined}
+              role="row"
+              className={`grid ${ROW_COLS} gap-2 items-start px-3 py-2.5 border-b border-border scroll-mt-4`}
+            >
               <input type="hidden" name="ids" value={li.id} />
               <div role="cell" className="min-w-0">
                 <input name={`room_area__${li.id}`} defaultValue={li.room_area} className={miniField} />
@@ -227,7 +249,8 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
                 />
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
         <div className="px-6 py-4 flex justify-end">
           <SaveChangesButton />
