@@ -25,8 +25,10 @@ export type BoardItem = {
 export type PropertyRow = { key: string; label: string; sub: string }
 export type CrewRow = { key: string; label: string }
 
-const DAYS = 14
+const DAY_RANGE_OPTIONS = [15, 20, 30]
 const DEFAULT_SPAN_DAYS = 1 // a freshly-scheduled stage covers 2 calendar days (start + this many more)
+const LABEL_COL_PX = 190
+const DAY_COL_PX = 64
 
 function toDate(s: string) {
   return new Date(`${s}T00:00:00Z`)
@@ -47,6 +49,9 @@ function fmtDow(iso: string) {
 }
 function fmtNum(iso: string) {
   return toDate(iso).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', timeZone: 'UTC' })
+}
+function gridCols(daysOut: number) {
+  return `${LABEL_COL_PX}px repeat(${daysOut}, minmax(${DAY_COL_PX}px, 1fr))`
 }
 
 type Placed = { item: BoardItem; start: number; end: number; lane: number }
@@ -87,11 +92,14 @@ export default function DispatchBoard({
 }) {
   const [items, setItems] = useState(initialItems)
   const [mode, setMode] = useState<'property' | 'crew'>('property')
+  const [daysOut, setDaysOut] = useState(15)
   const [dropHoverKey, setDropHoverKey] = useState<string | null>(null)
+  const [resizePreview, setResizePreview] = useState<{ key: string; start: string; end: string } | null>(null)
   const dragKeyRef = useRef<string | null>(null)
+  const headerRowRef = useRef<HTMLDivElement | null>(null)
 
   const todayISO = useMemo(() => toISO(new Date()), [])
-  const columns = useMemo(() => Array.from({ length: DAYS }, (_, i) => addDays(todayISO, i)), [todayISO])
+  const columns = useMemo(() => Array.from({ length: daysOut }, (_, i) => addDays(todayISO, i)), [todayISO, daysOut])
 
   const visibleItems = focusInspectionId ? items.filter((i) => i.inspectionId === focusInspectionId) : items
   const unscheduled = visibleItems.filter((i) => !i.scheduledStart || !i.scheduledEnd)
@@ -99,6 +107,24 @@ export default function DispatchBoard({
 
   function itemsForRow(rowKey: string) {
     return visibleItems.filter((i) => (mode === 'property' ? i.inspectionId === rowKey : i.crewKey === rowKey))
+  }
+
+  function draggingItem(): BoardItem | null {
+    const key = dragKeyRef.current
+    return key ? (items.find((i) => i.key === key) ?? null) : null
+  }
+
+  // A Stage belongs to one job's line items -- dropping it on a different
+  // property's row in Property view isn't a real action (there's nothing to
+  // "move"), unlike Crew view where a different row is a real reassignment.
+  // Checked on dragover (not just drop) so the browser shows a "not allowed"
+  // cursor over rows a Stage can't actually land on, instead of accepting
+  // the drop and silently doing nothing.
+  function isValidTarget(rowKey: string): boolean {
+    const item = draggingItem()
+    if (!item) return false
+    if (mode === 'property') return rowKey === item.inspectionId
+    return rowKey !== 'unassigned' // not a real crew to assign to
   }
 
   // `next.crewKey` is only ever passed by handleDrop when a Crew-view drop
@@ -138,16 +164,9 @@ export default function DispatchBoard({
     setDropHoverKey(null)
     const key = dragKeyRef.current
     dragKeyRef.current = null
-    if (!key) return
+    if (!key || !isValidTarget(rowKey)) return
     const item = items.find((i) => i.key === key)
     if (!item) return
-
-    // A Stage belongs to one job's line items -- dropping it on a different
-    // property's row in Property view isn't a real action (there's nothing
-    // to "move"), unlike Crew view where a different row is a real
-    // reassignment. Silently ignore rather than doing something surprising.
-    if (mode === 'property' && rowKey !== item.inspectionId) return
-    if (mode === 'crew' && rowKey === 'unassigned') return // not a real crew to assign to
 
     const duration = item.scheduledStart && item.scheduledEnd ? dayDiff(item.scheduledStart, item.scheduledEnd) : DEFAULT_SPAN_DAYS
     const scheduledStart = dayISO
@@ -168,6 +187,57 @@ export default function DispatchBoard({
     }
   }
 
+  // Drag-to-resize a bar's edge -- pointer events rather than native HTML5
+  // drag/drop, since resize needs continuous pixel tracking (not a discrete
+  // cell target). Mirrors the pointermove/pointerup-on-window pattern the
+  // original per-job Gantt used, for the same reason: a fast drag can fire
+  // those events before a React re-render lands, which would drop the
+  // gesture if handlers were attached conditionally via JSX props instead.
+  function getPxPerDay() {
+    const el = headerRowRef.current
+    if (!el) return DAY_COL_PX
+    return (el.getBoundingClientRect().width - LABEL_COL_PX) / daysOut
+  }
+
+  function onResizeStart(e: React.PointerEvent, item: BoardItem, edge: 'start' | 'end') {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!item.scheduledStart || !item.scheduledEnd) return
+    const startX = e.clientX
+    const origStart = item.scheduledStart
+    const origEnd = item.scheduledEnd
+    setResizePreview({ key: item.key, start: origStart, end: origEnd })
+
+    function handleMove(ev: PointerEvent) {
+      const pxPerDay = getPxPerDay()
+      const deltaDays = Math.round((ev.clientX - startX) / pxPerDay)
+      let nextStart = origStart
+      let nextEnd = origEnd
+      if (edge === 'start') {
+        nextStart = addDays(origStart, deltaDays)
+        if (nextStart > nextEnd) nextStart = nextEnd // can't push the start past the end
+      } else {
+        nextEnd = addDays(origEnd, deltaDays)
+        if (nextEnd < nextStart) nextEnd = nextStart // can't push the end before the start
+      }
+      setResizePreview({ key: item.key, start: nextStart, end: nextEnd })
+    }
+
+    function handleUp() {
+      window.removeEventListener('pointermove', handleMove)
+      window.removeEventListener('pointerup', handleUp)
+      setResizePreview((preview) => {
+        if (preview && (preview.start !== origStart || preview.end !== origEnd)) {
+          void commit(item.key, { scheduledStart: preview.start, scheduledEnd: preview.end })
+        }
+        return null
+      })
+    }
+
+    window.addEventListener('pointermove', handleMove)
+    window.addEventListener('pointerup', handleUp)
+  }
+
   return (
     <div>
       {focusInspectionId && (
@@ -180,25 +250,51 @@ export default function DispatchBoard({
       )}
 
       <div className="flex items-center justify-between gap-3 px-6 py-3 border-b border-border flex-wrap">
-        <div className="inline-flex border border-border rounded-[var(--radius-sm)] overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setMode('property')}
-            className={`px-3.5 py-1.5 text-[12.5px] font-semibold ${mode === 'property' ? 'bg-accent-bg text-accent-ink' : 'bg-surface text-text-muted'}`}
-          >
-            By Property
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('crew')}
-            className={`px-3.5 py-1.5 text-[12.5px] font-semibold border-l border-border ${mode === 'crew' ? 'bg-accent-bg text-accent-ink' : 'bg-surface text-text-muted'}`}
-          >
-            By Crew
-          </button>
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="inline-flex border border-border rounded-[var(--radius-sm)] overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setMode('property')}
+              className={`px-3.5 py-1.5 text-[12.5px] font-semibold ${mode === 'property' ? 'bg-accent-bg text-accent-ink' : 'bg-surface text-text-muted'}`}
+            >
+              By Property
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('crew')}
+              className={`px-3.5 py-1.5 text-[12.5px] font-semibold border-l border-border ${mode === 'crew' ? 'bg-accent-bg text-accent-ink' : 'bg-surface text-text-muted'}`}
+            >
+              By Crew
+            </button>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <label htmlFor="days-out" className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+              Show
+            </label>
+            <select
+              id="days-out"
+              value={daysOut}
+              onChange={(e) => setDaysOut(Number(e.target.value))}
+              className="text-[12.5px] border border-border rounded-[var(--radius-sm)] px-2 py-1 bg-surface"
+            >
+              {DAY_RANGE_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n} days
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-3 text-[11.5px] text-text-muted">
+            <span className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-[2px] bg-vendor-bg border border-vendor" /> Outside Vendor
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-[2px] bg-surface-alt border border-text-muted" /> GPM Staff
+            </span>
+          </div>
         </div>
         <div className="text-[12px] text-text-muted">
-          Showing <span className="data-mono">14</span> days from today · drag a bar to a new date, or onto another
-          crew&apos;s row to reassign
+          Drag a bar to a new date, drag its edge to resize, or drop it onto another crew&apos;s row to reassign
         </div>
       </div>
 
@@ -214,7 +310,9 @@ export default function DispatchBoard({
                 draggable
                 onDragStart={() => (dragKeyRef.current = i.key)}
                 onDragEnd={() => (dragKeyRef.current = null)}
-                className="border border-dashed border-border rounded-[var(--radius-sm)] bg-surface px-2.5 py-2 cursor-grab active:cursor-grabbing"
+                className={`border border-dashed rounded-[var(--radius-sm)] px-2.5 py-2 cursor-grab active:cursor-grabbing ${
+                  i.assignedTo === 'Outside Vendor' ? 'border-vendor bg-vendor-bg' : 'border-border bg-surface'
+                }`}
               >
                 <div className="font-semibold text-[12px]">{i.stageName}</div>
                 <div className="text-[10.5px] text-text-muted truncate">
@@ -226,8 +324,12 @@ export default function DispatchBoard({
         </div>
 
         <div className="border border-border rounded-[var(--radius-lg)] overflow-x-auto bg-surface">
-          <div className="min-w-[960px]">
-            <div className="grid grid-cols-[190px_repeat(14,minmax(64px,1fr))] border-b border-border bg-surface-alt">
+          <div style={{ minWidth: LABEL_COL_PX + daysOut * DAY_COL_PX }}>
+            <div
+              ref={headerRowRef}
+              className="grid border-b border-border bg-surface-alt"
+              style={{ gridTemplateColumns: gridCols(daysOut) }}
+            >
               <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted">
                 {mode === 'property' ? 'Property' : 'Crew'}
               </div>
@@ -249,8 +351,8 @@ export default function DispatchBoard({
               return (
                 <div key={row.key} className="border-b border-border last:border-b-0">
                   <div
-                    className="grid grid-cols-[190px_repeat(14,minmax(64px,1fr))] relative"
-                    style={{ gridTemplateRows: `repeat(${laneCount}, 1fr)`, minHeight: rowHeight }}
+                    className="grid relative"
+                    style={{ gridTemplateColumns: gridCols(daysOut), gridTemplateRows: `repeat(${laneCount}, 1fr)`, minHeight: rowHeight }}
                   >
                     <div className="px-3 py-2 border-r border-border flex flex-col justify-center" style={{ gridRow: `1 / span ${laneCount}` }}>
                       <div className="font-semibold text-[12.5px] truncate">{row.label}</div>
@@ -265,6 +367,7 @@ export default function DispatchBoard({
                         <div
                           key={c}
                           onDragOver={(e) => {
+                            if (!isValidTarget(row.key)) return
                             e.preventDefault()
                             setDropHoverKey(cellKey)
                           }}
@@ -280,22 +383,38 @@ export default function DispatchBoard({
                     })}
 
                     {placed.map(({ item, start, end, lane }) => {
-                      if (end < 0 || start >= DAYS) return null // fully outside the visible window
-                      const startCol = Math.max(2, start + 2)
-                      const endCol = Math.min(DAYS + 2, end + 3)
+                      const preview = resizePreview?.key === item.key ? resizePreview : null
+                      const effStart = preview ? dayDiff(todayISO, preview.start) : start
+                      const effEnd = preview ? dayDiff(todayISO, preview.end) : end
+                      if (effEnd < 0 || effStart >= daysOut) return null // fully outside the visible window
+                      const startCol = Math.max(2, effStart + 2)
+                      const endCol = Math.min(daysOut + 2, effEnd + 3)
                       const subtext = mode === 'property' ? item.crewLabel : `${item.propertyAddress} · Job ${item.jobNumber}`
+                      const isVendor = item.assignedTo === 'Outside Vendor'
                       return (
                         <div
                           key={item.key}
                           draggable
                           onDragStart={() => (dragKeyRef.current = item.key)}
                           onDragEnd={() => (dragKeyRef.current = null)}
-                          className="relative m-1 px-2 py-1 rounded-[var(--radius-sm)] bg-surface-alt border border-border border-l-[3px] border-l-text-muted cursor-grab active:cursor-grabbing overflow-hidden"
+                          className={`relative m-1 px-2 py-1 rounded-[var(--radius-sm)] border border-l-[3px] cursor-grab active:cursor-grabbing overflow-hidden ${
+                            isVendor ? 'bg-vendor-bg border-border border-l-vendor' : 'bg-surface-alt border-border border-l-text-muted'
+                          } ${preview ? 'outline outline-2 outline-accent outline-offset-1' : ''}`}
                           style={{ gridColumn: `${startCol} / ${endCol}`, gridRow: lane + 1, zIndex: 2 }}
                           title={`${item.stageName} — ${item.itemCount} item(s)`}
                         >
+                          <div
+                            onPointerDown={(e) => onResizeStart(e, item, 'start')}
+                            draggable={false}
+                            className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize"
+                          />
                           <div className="font-semibold text-[11.5px] truncate">{item.stageName}</div>
                           <div className="text-[10px] text-text-muted truncate">{subtext}</div>
+                          <div
+                            onPointerDown={(e) => onResizeStart(e, item, 'end')}
+                            draggable={false}
+                            className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize"
+                          />
                         </div>
                       )
                     })}

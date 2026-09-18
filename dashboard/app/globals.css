@@ -23,6 +23,11 @@
   --color-neutral: #8A8F98;
   --color-neutral-bg: #EFEFF1;
 
+  /* Scoped second accent, Dispatch Board only -- see DESIGN.md Decisions
+     Log 2026-09-18. Not for use elsewhere without its own decision. */
+  --color-vendor: #3D6B8A;
+  --color-vendor-bg: #E9F1F6;
+
   --radius-sm: 3px;
   --radius-md: 6px;
   --radius-lg: 8px;
@@ -50,6 +55,8 @@
   --color-error-bg: var(--color-error-bg);
   --color-neutral: var(--color-neutral);
   --color-neutral-bg: var(--color-neutral-bg);
+  --color-vendor: var(--color-vendor);
+  --color-vendor-bg: var(--color-vendor-bg);
   --font-sans: var(--font-body);
   --font-display: var(--font-display);
   --font-mono: var(--font-jetbrains-mono);
