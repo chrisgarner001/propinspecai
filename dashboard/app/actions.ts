@@ -95,6 +95,30 @@ export async function updateChargebackReview(formData: FormData) {
   revalidatePath(`/inspections/${inspectionId}/move-out-report`)
 }
 
+// STAND-IN for the real PropertyWare integration -- same situation as
+// sendBatchToPW below: there's no PW API access/docs available yet to
+// actually attach the generated Move-Out Report PDF to the tenant's file in
+// PropertyWare. Records a manually-typed PW reference against the
+// inspection instead (the reviewer posts the PDF to PW themselves and
+// pastes back its reference here), which still gives a real audit trail of
+// who posted what and when. Swap in the real API call here once PW
+// credentials/docs exist; the caller (chargeback-review page) can keep the
+// same "type a reference, submit" shape, or drop it once posting is fully
+// automated.
+export async function postMoveOutReport(inspectionId: string, formData: FormData) {
+  const sql = getSql()
+  const pwReference = String(formData.get('pw_reference') ?? '').trim()
+  if (!pwReference) return
+
+  await sql`
+    update inspections
+    set move_out_report_posted_at = now(), move_out_report_pw_reference = ${pwReference}
+    where id = ${inspectionId}
+  `
+
+  revalidatePath(`/inspections/${inspectionId}/chargeback-review`)
+}
+
 // Saves edits made in the Quote Sheet editor (app/inspections/[id]/quote-sheet).
 // A distinct action from bulkUpdateLineItems above -- that one deliberately
 // keeps room_area/item read-only (edited in-place would desync the video

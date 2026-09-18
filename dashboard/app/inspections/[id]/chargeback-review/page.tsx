@@ -4,14 +4,16 @@ import { updateChargebackReview } from '@/app/actions'
 import AppShell from '@/app/components/AppShell'
 import ConditionBadge from '@/app/components/ConditionBadge'
 import TenantChargeInput from '@/app/components/TenantChargeInput'
+import PostMoveOutReportButton from '@/app/components/PostMoveOutReportButton'
 
 // A standalone, fast pass at the tenant-charge decision -- decoupled from the
 // Quote Sheet's materials/labor/vendor/stage/batch fields, which often
 // aren't filled in yet within the 30-day security-deposit disposition
 // deadline (MCL 554.608). A senior PM or maintenance supervisor works
 // through this list, decides what's a chargeback, and assigns a dollar
-// amount per item; "Generate Move-Out Report" (same PDF as before, unchanged)
-// is the next step right here, not buried back on the main inspection page.
+// amount per item. "Review Move-Out Report" opens the PDF to check before
+// committing to anything; "Generate and Post Report" is the real, one-way
+// action (posts to PropertyWare, attaches the PDF to the tenant's file).
 
 type LineItem = {
   id: string
@@ -49,16 +51,25 @@ export default async function ChargebackReviewPage({ params }: { params: Promise
 
   return (
     <AppShell active="/" reviewerName="Jessica Zilka" title="Tenant Chargeback Review" wide>
-      <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-surface-alt">
+      <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-surface-alt flex-wrap gap-2">
         <div className="text-[13px] text-text-muted">
           {inspection.property_address} · Job <span className="data-mono">{inspection.job_number}</span>
         </div>
-        <a
-          href={`/inspections/${id}/move-out-report`}
-          className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-3.5 py-2 text-[13px] font-semibold"
-        >
-          Generate Move-Out Report
-        </a>
+        <div className="flex items-center gap-2">
+          <a
+            href={`/inspections/${id}/move-out-report`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3.5 py-2 text-[13px] font-semibold"
+          >
+            Review Move-Out Report
+          </a>
+          <PostMoveOutReportButton
+            inspectionId={id}
+            postedAt={inspection.move_out_report_posted_at ? inspection.move_out_report_posted_at.toISOString() : null}
+            pwReference={inspection.move_out_report_pw_reference}
+          />
+        </div>
       </div>
 
       <div className="flex items-center gap-4 px-6 py-2 border-b border-border text-[12px]">
