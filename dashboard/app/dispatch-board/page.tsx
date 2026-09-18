@@ -134,13 +134,21 @@ export default async function DispatchBoardPage({
     { key: 'unassigned', label: 'Unassigned / Mixed' },
   ]
 
+  const resolvedFocusId = inspections.some((i) => i.id === focusInspectionId) ? focusInspectionId : undefined
+  const focusedProperty = resolvedFocusId ? inspectionById.get(resolvedFocusId)?.property_address : undefined
+
   return (
-    <AppShell active="/dispatch-board" reviewerName="Jessica Zilka" title="Dispatch Board" wide>
+    <AppShell
+      active="/dispatch-board"
+      reviewerName="Jessica Zilka"
+      title={focusedProperty ? `Dispatch Board — ${focusedProperty}` : 'Dispatch Board'}
+      wide
+    >
       <DispatchBoard
         items={items}
         propertyRows={propertyRows}
         crewRows={crewRows}
-        focusInspectionId={inspections.some((i) => i.id === focusInspectionId) ? focusInspectionId : undefined}
+        focusInspectionId={resolvedFocusId}
       />
     </AppShell>
   )

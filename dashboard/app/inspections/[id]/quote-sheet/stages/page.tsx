@@ -107,7 +107,7 @@ export default async function QuoteSheetStagesPage({ params }: { params: Promise
   })
 
   return (
-    <AppShell active="/" reviewerName="Jessica Zilka" title="Quote Sheet — Stage View" wide>
+    <AppShell active="/" reviewerName="Jessica Zilka" title={`Stage View — ${inspection.property_address}`} wide>
       <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-surface-alt">
         <div className="text-[13px] text-text-muted">
           {inspection.property_address} · Job <span className="data-mono">{inspection.job_number}</span>

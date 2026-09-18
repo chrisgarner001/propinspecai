@@ -1,5 +1,6 @@
 import Image from 'next/image'
 import Link from 'next/link'
+import RecentNav from './RecentNav'
 
 const NAV_ITEMS = [
   { href: '/', label: 'Inspections' },
@@ -65,6 +66,7 @@ export default function AppShell({
             </li>
           ))}
         </ul>
+        <RecentNav label={title} />
       </nav>
       <div className="min-w-0">
         <header className="flex items-center justify-between gap-4 px-6 py-4 border-b border-border">

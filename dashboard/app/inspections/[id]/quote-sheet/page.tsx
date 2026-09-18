@@ -108,7 +108,7 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
   const totalHours = lineItems.reduce((sum, li) => sum + (li.labor_hours !== null ? Number(li.labor_hours) : 0), 0)
 
   return (
-    <AppShell active="/" reviewerName="Jessica Zilka" title="Quote Sheet" wide>
+    <AppShell active="/" reviewerName="Jessica Zilka" title={`Quote Sheet — ${inspection.property_address}`} wide>
       <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-surface-alt">
         <div className="flex items-center gap-3">
           <div className="text-[13px] text-text-muted">
