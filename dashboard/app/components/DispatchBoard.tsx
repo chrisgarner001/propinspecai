@@ -54,6 +54,19 @@ function gridCols(daysOut: number) {
   return `${LABEL_COL_PX}px repeat(${daysOut}, minmax(${DAY_COL_PX}px, 1fr))`
 }
 
+// Finds the day-cell under a point even when a bar is visually stacked on
+// top of it -- elementsFromPoint returns every element at that point in
+// stacking order (not just the topmost, unlike elementFromPoint), so a bar
+// with no drag-target semantics of its own never shadows the cell beneath.
+function findDropTarget(x: number, y: number): { rowKey: string; dayISO: string } | null {
+  const stack = document.elementsFromPoint(x, y)
+  for (const el of stack) {
+    const cell = (el as HTMLElement).closest?.('[data-row-key][data-day]') as HTMLElement | null
+    if (cell) return { rowKey: cell.dataset.rowKey!, dayISO: cell.dataset.day! }
+  }
+  return null
+}
+
 type Placed = { item: BoardItem; start: number; end: number; lane: number }
 
 // Greedily packs a row's stages into the fewest sub-lanes so overlapping
@@ -94,9 +107,8 @@ export default function DispatchBoard({
   const [mode, setMode] = useState<'property' | 'crew'>('property')
   const [daysOut, setDaysOut] = useState(15)
   const [dropHoverKey, setDropHoverKey] = useState<string | null>(null)
+  const [draggingKey, setDraggingKey] = useState<string | null>(null)
   const [resizePreview, setResizePreview] = useState<{ key: string; start: string; end: string } | null>(null)
-  const [isDragging, setIsDragging] = useState(false)
-  const dragKeyRef = useRef<string | null>(null)
   const headerRowRef = useRef<HTMLDivElement | null>(null)
 
   const todayISO = useMemo(() => toISO(new Date()), [])
@@ -110,38 +122,11 @@ export default function DispatchBoard({
     return visibleItems.filter((i) => (mode === 'property' ? i.inspectionId === rowKey : i.crewKey === rowKey))
   }
 
-  function draggingItem(): BoardItem | null {
-    const key = dragKeyRef.current
-    return key ? (items.find((i) => i.key === key) ?? null) : null
-  }
-
-  // The drag key lives in dragKeyRef, not dataTransfer -- but dataTransfer
-  // still needs *something* set via setData() in dragstart, or several
-  // browsers (Firefox reliably, some Chrome/Edge configurations too) refuse
-  // to treat the gesture as a real drag session at all: dragover/drop then
-  // never fire on any target, which looks exactly like "drag and drop isn't
-  // working" with no console error to point at.
-  function startDrag(e: React.DragEvent, key: string) {
-    dragKeyRef.current = key
-    setIsDragging(true)
-    e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', key)
-  }
-
-  function endDrag() {
-    dragKeyRef.current = null
-    setIsDragging(false)
-    setDropHoverKey(null)
-  }
-
   // A Stage belongs to one job's line items -- dropping it on a different
   // property's row in Property view isn't a real action (there's nothing to
   // "move"), unlike Crew view where a different row is a real reassignment.
-  // Checked on dragover (not just drop) so the browser shows a "not allowed"
-  // cursor over rows a Stage can't actually land on, instead of accepting
-  // the drop and silently doing nothing.
-  function isValidTarget(rowKey: string): boolean {
-    const item = draggingItem()
+  function isValidTarget(draggedKey: string, rowKey: string): boolean {
+    const item = items.find((i) => i.key === draggedKey)
     if (!item) return false
     if (mode === 'property') return rowKey === item.inspectionId
     return rowKey !== 'unassigned' // not a real crew to assign to
@@ -180,11 +165,8 @@ export default function DispatchBoard({
     }
   }
 
-  function handleDrop(rowKey: string, dayISO: string) {
-    setDropHoverKey(null)
-    const key = dragKeyRef.current
-    dragKeyRef.current = null
-    if (!key || !isValidTarget(rowKey)) return
+  function handleDrop(key: string, rowKey: string, dayISO: string) {
+    if (!isValidTarget(key, rowKey)) return
     const item = items.find((i) => i.key === key)
     if (!item) return
 
@@ -207,12 +189,46 @@ export default function DispatchBoard({
     }
   }
 
-  // Drag-to-resize a bar's edge -- pointer events rather than native HTML5
-  // drag/drop, since resize needs continuous pixel tracking (not a discrete
-  // cell target). Mirrors the pointermove/pointerup-on-window pattern the
-  // original per-job Gantt used, for the same reason: a fast drag can fire
-  // those events before a React re-render lands, which would drop the
-  // gesture if handlers were attached conditionally via JSX props instead.
+  // Whole-item drag (reschedule, or reassign in Crew view) -- pointer
+  // events, not native HTML5 drag/drop. Native DnD turned out unreliable
+  // here on two separate fronts (dragstart never registering as a real
+  // drag session without dataTransfer.setData in some browsers, and bars
+  // silently swallowing drops meant for the cell underneath them since
+  // dragover doesn't bubble sideways to a covered sibling) -- pointer
+  // events sidestep both, and match the mechanism already proven to work
+  // in this app for the resize handles below and the original per-job
+  // Gantt before this board replaced it. Window-level listeners (not JSX
+  // props) so a fast drag can't fire pointermove/pointerup before a React
+  // re-render lands and silently drops the gesture.
+  function onItemPointerDown(e: React.PointerEvent, key: string) {
+    if (e.button !== 0) return
+    e.preventDefault()
+    setDraggingKey(key)
+    let target: { rowKey: string; dayISO: string } | null = null
+
+    function handleMove(ev: PointerEvent) {
+      const found = findDropTarget(ev.clientX, ev.clientY)
+      if (found && isValidTarget(key, found.rowKey)) {
+        target = found
+        setDropHoverKey(`${found.rowKey}:${found.dayISO}`)
+      } else {
+        target = null
+        setDropHoverKey(null)
+      }
+    }
+
+    function handleUp() {
+      window.removeEventListener('pointermove', handleMove)
+      window.removeEventListener('pointerup', handleUp)
+      setDraggingKey(null)
+      setDropHoverKey(null)
+      if (target) handleDrop(key, target.rowKey, target.dayISO)
+    }
+
+    window.addEventListener('pointermove', handleMove)
+    window.addEventListener('pointerup', handleUp)
+  }
+
   function getPxPerDay() {
     const el = headerRowRef.current
     if (!el) return DAY_COL_PX
@@ -327,12 +343,10 @@ export default function DispatchBoard({
             {unscheduled.map((i) => (
               <div
                 key={i.key}
-                draggable
-                onDragStart={(e) => startDrag(e, i.key)}
-                onDragEnd={endDrag}
-                className={`border border-dashed rounded-[var(--radius-sm)] px-2.5 py-2 cursor-grab active:cursor-grabbing ${
+                onPointerDown={(e) => onItemPointerDown(e, i.key)}
+                className={`border border-dashed rounded-[var(--radius-sm)] px-2.5 py-2 cursor-grab active:cursor-grabbing touch-none select-none ${
                   i.assignedTo === 'Outside Vendor' ? 'border-vendor bg-vendor-bg' : 'border-border bg-surface'
-                }`}
+                } ${draggingKey === i.key ? 'opacity-40' : ''}`}
               >
                 <div className="font-semibold text-[12px]">{i.stageName}</div>
                 <div className="text-[10.5px] text-text-muted truncate">
@@ -381,29 +395,17 @@ export default function DispatchBoard({
                       )}
                     </div>
 
-                    {/* Day-cells and bars are siblings, not parent/child, so a
-                        dragover event that lands on a bar never reaches the
-                        cell underneath it via bubbling -- and bars have no
-                        drop handler of their own. Without isDragging's
-                        pointer-events-none on bars below, any drop target
-                        already covered by an existing bar would silently
-                        reject every drop, which is worse the busier a row
-                        (crew rows especially) gets. */}
+                    {/* Pure drop targets, found via elementsFromPoint during a
+                        pointer drag -- no drag-related event handlers needed
+                        here at all, which is what makes a bar sitting on top
+                        harmless (elementsFromPoint sees through it). */}
                     {columns.map((c, i) => {
                       const cellKey = `${row.key}:${c}`
                       return (
                         <div
                           key={c}
-                          onDragOver={(e) => {
-                            if (!isValidTarget(row.key)) return
-                            e.preventDefault()
-                            setDropHoverKey(cellKey)
-                          }}
-                          onDragLeave={() => setDropHoverKey((k) => (k === cellKey ? null : k))}
-                          onDrop={(e) => {
-                            e.preventDefault()
-                            handleDrop(row.key, c)
-                          }}
+                          data-row-key={row.key}
+                          data-day={c}
                           className={`border-l border-border ${i === 0 ? 'bg-accent-bg/40' : ''} ${dropHoverKey === cellKey ? 'bg-accent-bg' : ''}`}
                           style={{ gridColumn: i + 2, gridRow: `1 / span ${laneCount}` }}
                         />
@@ -422,25 +424,23 @@ export default function DispatchBoard({
                       return (
                         <div
                           key={item.key}
-                          draggable
-                          onDragStart={(e) => startDrag(e, item.key)}
-                          onDragEnd={endDrag}
-                          className={`relative m-1 px-2 py-1 rounded-[var(--radius-sm)] border border-l-[3px] cursor-grab active:cursor-grabbing overflow-hidden ${
+                          onPointerDown={(e) => onItemPointerDown(e, item.key)}
+                          className={`relative m-1 px-2 py-1 rounded-[var(--radius-sm)] border border-l-[3px] cursor-grab active:cursor-grabbing overflow-hidden touch-none select-none ${
                             isVendor ? 'bg-vendor-bg border-border border-l-vendor' : 'bg-surface-alt border-border border-l-text-muted'
-                          } ${preview ? 'outline outline-2 outline-accent outline-offset-1' : ''} ${isDragging ? 'pointer-events-none' : ''}`}
+                          } ${preview || draggingKey === item.key ? 'outline outline-2 outline-accent outline-offset-1' : ''} ${
+                            draggingKey === item.key ? 'opacity-60' : ''
+                          }`}
                           style={{ gridColumn: `${startCol} / ${endCol}`, gridRow: lane + 1, zIndex: 2 }}
                           title={`${item.stageName} — ${item.itemCount} item(s)`}
                         >
                           <div
                             onPointerDown={(e) => onResizeStart(e, item, 'start')}
-                            draggable={false}
                             className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize"
                           />
                           <div className="font-semibold text-[11.5px] truncate">{item.stageName}</div>
                           <div className="text-[10px] text-text-muted truncate">{subtext}</div>
                           <div
                             onPointerDown={(e) => onResizeStart(e, item, 'end')}
-                            draggable={false}
                             className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize"
                           />
                         </div>
