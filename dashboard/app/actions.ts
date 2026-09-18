@@ -43,8 +43,6 @@ export async function bulkUpdateLineItems(formData: FormData) {
     const laborHours = toNumberOrNull(formData.get(`labor_hours__${id}`))
     const laborCost = laborHours !== null ? laborHours * laborRate : null
     const vendorEstimatedCost = toNumberOrNull(formData.get(`vendor_estimated_cost__${id}`))
-    const tenantCharge = formData.get(`tenant_charge__${id}`) !== null
-    const tenantChargeAmount = toNumberOrNull(formData.get(`tenant_charge_amount__${id}`))
     const tenantApproved = formData.get(`tenant_approved__${id}`) !== null
     const vendorIdRaw = formData.get(`vendor_id__${id}`)
     const vendorId = vendorIdRaw ? String(vendorIdRaw) : null
@@ -62,8 +60,6 @@ export async function bulkUpdateLineItems(formData: FormData) {
         labor_hours = ${laborHours},
         labor_cost = ${laborCost},
         vendor_estimated_cost = ${vendorEstimatedCost},
-        tenant_charge = ${tenantCharge},
-        tenant_charge_amount = ${tenantChargeAmount},
         tenant_approved = ${tenantApproved},
         vendor_id = ${vendorId}
       where id = ${id}
@@ -71,6 +67,32 @@ export async function bulkUpdateLineItems(formData: FormData) {
   }
 
   revalidatePath(`/inspections/${inspectionId}`)
+}
+
+// Saves the standalone Tenant Chargeback Review screen
+// (app/inspections/[id]/chargeback-review) -- touches ONLY tenant_charge and
+// tenant_charge_amount, unlike bulkUpdateLineItems above, so a senior PM can
+// make the tenant-charge call fast against the 30-day security-deposit
+// disposition deadline without wading through (or accidentally clobbering)
+// the AI-extraction/Quote-Sheet fields this page doesn't even show.
+export async function updateChargebackReview(formData: FormData) {
+  const sql = getSql()
+  const inspectionId = String(formData.get('inspection_id'))
+  const ids = formData.getAll('ids').map(String)
+
+  for (const id of ids) {
+    const tenantCharge = formData.get(`tenant_charge__${id}`) !== null
+    const tenantChargeAmount = toNumberOrNull(formData.get(`tenant_charge_amount__${id}`))
+
+    await sql`
+      update line_items
+      set tenant_charge = ${tenantCharge}, tenant_charge_amount = ${tenantChargeAmount}
+      where id = ${id}
+    `
+  }
+
+  revalidatePath(`/inspections/${inspectionId}/chargeback-review`)
+  revalidatePath(`/inspections/${inspectionId}/move-out-report`)
 }
 
 // Saves edits made in the Quote Sheet editor (app/inspections/[id]/quote-sheet).

@@ -6,7 +6,6 @@ import StatusSelect from '@/app/components/StatusSelect'
 import EvidenceStill from '@/app/components/EvidenceStill'
 import LineItemAssignment from '@/app/components/LineItemAssignment'
 import NewLineItemAssignedTo from '@/app/components/NewLineItemAssignedTo'
-import TenantChargeCheckboxes from '@/app/components/TenantChargeCheckboxes'
 import VideoPopupLink from '@/app/components/VideoPopupLink'
 import DeleteInspectionButton from '@/app/components/DeleteInspectionButton'
 import RemoveSectionControl from '@/app/components/RemoveSectionControl'
@@ -43,8 +42,6 @@ type LineItem = {
   labor_hours: string | null
   labor_cost: string | null
   vendor_estimated_cost: string | null
-  tenant_charge: boolean
-  tenant_charge_amount: string | null
   tenant_approved: boolean
   is_manual_addition: boolean
   source_video_file: string | null
@@ -61,7 +58,7 @@ type Vendor = { id: string; name: string }
 // independent grid container -- desyncs that row's column edges from the
 // header row's. minmax(0, ...) caps growth to the fr share so overflowing
 // content wraps/truncates inside the cell instead of pushing columns right.
-const ROW_COLS = 'grid-cols-[minmax(0,2fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,0.8fr)]'
+const ROW_COLS = 'grid-cols-[minmax(0,2fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,0.9fr)]'
 
 export default async function InspectionPage({
   params,
@@ -106,10 +103,10 @@ export default async function InspectionPage({
             Create Quote Sheet
           </a>
           <a
-            href={`/inspections/${id}/move-out-report`}
+            href={`/inspections/${id}/chargeback-review`}
             className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
           >
-            Create Move Out Report
+            Tenant Chargeback Review
           </a>
         </div>
       </div>
@@ -187,7 +184,7 @@ export default async function InspectionPage({
             role="row"
             className={`grid ${ROW_COLS} gap-2 px-3 py-2.5 border-b border-border`}
           >
-            {['Item', 'Condition', 'Assigned To', 'Materials', 'Labor (hrs)', 'Vendor Est.', 'Tenant Charge', 'Remove from Quote Sheet'].map(
+            {['Item', 'Condition', 'Assigned To', 'Materials', 'Labor (hrs)', 'Vendor Est.', 'Remove from Quote Sheet'].map(
               (h) => (
                 <div
                   key={h}
@@ -281,13 +278,14 @@ export default async function InspectionPage({
                 laborRate={laborRate}
                 vendorEstimatedCost={li.vendor_estimated_cost}
               />
-              <TenantChargeCheckboxes
-                id={li.id}
-                tenantCharge={li.tenant_charge}
-                tenantChargeAmount={li.tenant_charge_amount}
-                defaultTotal={Number(li.materials_cost ?? 0) + Number(li.labor_cost ?? 0)}
-                removedFromQuoteSheet={li.tenant_approved}
-              />
+              <div role="cell" className="min-w-0 flex justify-center">
+                <input
+                  type="checkbox"
+                  name={`tenant_approved__${li.id}`}
+                  defaultChecked={li.tenant_approved}
+                  className="h-4 w-4 cursor-pointer accent-error"
+                />
+              </div>
             </div>
           ))}
         </div>
