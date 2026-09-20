@@ -11,10 +11,12 @@ import {
   updateBulkMaterial,
   applyBulkMaterialMatches,
   dismissBulkMaterialMatches,
+  linkLineItemToBulkMaterial,
 } from '@/app/actions'
 import { matchBulkMaterialCandidates } from '@/lib/bulkMatch'
 import AppShell from '@/app/components/AppShell'
-import LineItemAssignment from '@/app/components/LineItemAssignment'
+import LineItemVendorAssignment from '@/app/components/LineItemVendorAssignment'
+import LineItemMaterialsCost from '@/app/components/LineItemMaterialsCost'
 import RemoveSectionControl from '@/app/components/RemoveSectionControl'
 import SaveChangesButton from '@/app/components/SaveChangesButton'
 import StatusSelect from '@/app/components/StatusSelect'
@@ -50,7 +52,7 @@ function stageAnchor(key: string) {
 // Nfr, so a long unbroken cell can't force its track wider than its share
 // and desync this row's columns from the header row's.
 const ROW_COLS =
-  'grid-cols-[minmax(0,0.8fr)_minmax(0,1.3fr)_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,1fr)]'
+  'grid-cols-[minmax(0,0.8fr)_minmax(0,1.3fr)_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)]'
 
 type LineItem = {
   id: string
@@ -79,6 +81,7 @@ type BulkMaterial = {
   sku: string | null
   quantity: string | null
   notes: string | null
+  cost: string | null
   matches_reviewed: boolean
 }
 
@@ -120,7 +123,7 @@ export default async function QuoteSheetPage({
   }
 
   const bulkMaterials = (await sql`
-    select id, supplier, sku, quantity, notes, matches_reviewed from inspection_bulk_materials
+    select id, supplier, sku, quantity, notes, cost, matches_reviewed from inspection_bulk_materials
     where inspection_id = ${id}
     order by created_at
   `) as unknown as BulkMaterial[]
@@ -250,15 +253,18 @@ export default async function QuoteSheetPage({
                     Material Item {index + 1}
                   </span>
                   {editBulk !== bm.id && (
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 leading-none">
                       <a
                         href={`/inspections/${id}/quote-sheet?editBulk=${bm.id}`}
-                        className="text-[11px] font-semibold text-text-muted hover:text-accent"
+                        className="text-[11px] font-semibold text-text-muted hover:text-accent leading-none"
                       >
                         Edit
                       </a>
-                      <form action={removeBulkMaterial.bind(null, bm.id, id)}>
-                        <button type="submit" className="text-[11px] font-semibold text-error hover:text-error/70">
+                      <form action={removeBulkMaterial.bind(null, bm.id, id)} className="contents">
+                        <button
+                          type="submit"
+                          className="appearance-none bg-transparent border-0 p-0 text-[11px] font-semibold text-error hover:text-error/70 leading-none"
+                        >
                           Delete
                         </button>
                       </form>
@@ -286,6 +292,12 @@ export default async function QuoteSheetPage({
                       </label>
                       <input name="bulk_quantity" defaultValue={bm.quantity ?? ''} className={miniField} />
                     </div>
+                    <div className="w-24">
+                      <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">
+                        Cost
+                      </label>
+                      <input name="bulk_cost" type="number" step="0.01" defaultValue={bm.cost ?? ''} className={miniField} />
+                    </div>
                     <div className="flex-[2] min-w-[180px]">
                       <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">
                         Notes
@@ -310,6 +322,7 @@ export default async function QuoteSheetPage({
                     <span className="font-semibold">{bm.supplier ?? '—'}</span>{' '}
                     <span className="data-mono text-text-muted">{bm.sku ?? ''}</span>
                     {bm.quantity && <span className="text-text-muted"> · Qty {bm.quantity}</span>}
+                    {bm.cost && <span className="text-text-muted"> · Cost ${Number(bm.cost).toFixed(2)}</span>}
                     {bm.notes && <span className="text-text-muted"> — {bm.notes}</span>}
                   </div>
                 )}
@@ -330,6 +343,10 @@ export default async function QuoteSheetPage({
           <div className="w-24">
             <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">Qty</label>
             <input name="bulk_quantity" placeholder="e.g. 1 pack" className={miniField} />
+          </div>
+          <div className="w-24">
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">Cost</label>
+            <input name="bulk_cost" type="number" step="0.01" placeholder="e.g. 18.00" className={miniField} />
           </div>
           <div className="flex-[2] min-w-[180px]">
             <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">Notes</label>
@@ -392,7 +409,7 @@ export default async function QuoteSheetPage({
         <input type="hidden" name="inspection_id" value={id} />
         <div role="table">
           <div role="row" className={`grid ${ROW_COLS} gap-2 px-3 py-2.5 border-b border-border`}>
-            {['Area', 'Details', 'Comments', 'Vendor/GPM', 'Materials', 'Labor (hrs)', 'Vendor Quote', 'Stage'].map((h) => (
+            {['Area', 'Details', 'Comments', 'Vendor/GPM', 'Vendor Quote', 'Stage'].map((h) => (
               <div key={h} role="columnheader" className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
                 {h}
               </div>
@@ -437,14 +454,11 @@ export default async function QuoteSheetPage({
                   className={`${miniField} text-text-muted resize-y`}
                 />
               </div>
-              <LineItemAssignment
+              <LineItemVendorAssignment
                 id={li.id}
                 assignedTo={li.assigned_to}
                 vendorId={li.vendor_id}
                 vendors={vendors}
-                materialsCost={li.materials_cost}
-                laborHours={li.labor_hours}
-                laborRate={laborRate}
                 vendorEstimatedCost={li.vendor_estimated_cost}
               />
               <div role="cell" className="min-w-0">
@@ -457,7 +471,14 @@ export default async function QuoteSheetPage({
                   ))}
                 </select>
               </div>
-              <div role="cell" className="col-span-full flex items-center gap-1.5 mt-1">
+              <div role="cell" className="col-span-full flex items-center gap-3 mt-1">
+                <span className="text-[11px] font-semibold data-mono">
+                  Total: $
+                  {(li.assigned_to === 'Outside Vendor'
+                    ? Number(li.vendor_estimated_cost ?? 0)
+                    : Number(li.materials_cost ?? 0) + Number(li.labor_hours ?? 0) * laborRate
+                  ).toFixed(2)}
+                </span>
                 <RemoveSectionControl id={li.id} />
                 <button
                   type="submit"
@@ -467,10 +488,11 @@ export default async function QuoteSheetPage({
                   Duplicate
                 </button>
               </div>
-              <div role="cell" className="col-span-full flex flex-wrap items-end gap-2 mt-1 pt-2 pb-1 border-t border-border">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted pb-1.5">
-                  Supplier/SKU
-                </span>
+              <div role="cell" className="col-span-full mt-1 pt-2 border-t border-border">
+                <div className="text-center text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1.5">
+                  Materials for this Item
+                </div>
+                <div className="flex flex-wrap items-end gap-2">
                 <div className="w-36">
                   <input
                     name={`supplier__${li.id}`}
@@ -496,6 +518,13 @@ export default async function QuoteSheetPage({
                     className={miniField}
                   />
                 </div>
+                <LineItemMaterialsCost
+                  id={li.id}
+                  assignedTo={li.assigned_to}
+                  materialsCost={li.materials_cost}
+                  laborHours={li.labor_hours}
+                  laborRate={laborRate}
+                />
 
                 {(additionalSkusByItem.get(li.id) ?? []).map((row) => (
                   <div
@@ -539,8 +568,35 @@ export default async function QuoteSheetPage({
                     formAction={addLineItemSku.bind(null, li.id, id)}
                     className="text-[10px] font-semibold text-text-muted hover:text-accent border border-border hover:border-accent rounded-[var(--radius-sm)] px-1.5 py-1 bg-surface whitespace-nowrap"
                   >
-                    Add
+                    Add Item
                   </button>
+                </div>
+
+                {bulkMaterials.length > 0 && (
+                  <div className="flex items-end gap-1.5 pl-2 ml-1 border-l border-border">
+                    <select
+                      name={`bulk_material_id__${li.id}`}
+                      defaultValue=""
+                      className={`${miniField} text-[11px] w-40`}
+                    >
+                      <option value="" disabled>
+                        Choose bulk item…
+                      </option>
+                      {bulkMaterials.map((bm) => (
+                        <option key={bm.id} value={bm.id}>
+                          {bm.supplier ?? '—'} {bm.sku ?? ''}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="submit"
+                      formAction={linkLineItemToBulkMaterial.bind(null, li.id, id)}
+                      className="text-[10px] font-semibold text-text-muted hover:text-accent border border-border hover:border-accent rounded-[var(--radius-sm)] px-1.5 py-1 bg-surface whitespace-nowrap"
+                    >
+                      Use Bulk Item
+                    </button>
+                  </div>
+                )}
                 </div>
               </div>
             </div>

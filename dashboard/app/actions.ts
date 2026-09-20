@@ -347,11 +347,12 @@ export async function addBulkMaterial(inspectionId: string, formData: FormData) 
   const sku = String(formData.get('bulk_sku') ?? '').trim() || null
   const quantity = String(formData.get('bulk_quantity') ?? '').trim() || null
   const notes = String(formData.get('bulk_notes') ?? '').trim() || null
+  const cost = toNumberOrNull(formData.get('bulk_cost'))
   if (!supplier && !sku && !notes) return
 
   await sql`
-    insert into inspection_bulk_materials (inspection_id, supplier, sku, quantity, notes)
-    values (${inspectionId}, ${supplier}, ${sku}, ${quantity}, ${notes})
+    insert into inspection_bulk_materials (inspection_id, supplier, sku, quantity, notes, cost)
+    values (${inspectionId}, ${supplier}, ${sku}, ${quantity}, ${notes}, ${cost})
   `
 
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
@@ -367,10 +368,11 @@ export async function updateBulkMaterial(id: string, inspectionId: string, formD
   const sku = String(formData.get('bulk_sku') ?? '').trim() || null
   const quantity = String(formData.get('bulk_quantity') ?? '').trim() || null
   const notes = String(formData.get('bulk_notes') ?? '').trim() || null
+  const cost = toNumberOrNull(formData.get('bulk_cost'))
 
   await sql`
     update inspection_bulk_materials
-    set supplier = ${supplier}, sku = ${sku}, quantity = ${quantity}, notes = ${notes}, matches_reviewed = false
+    set supplier = ${supplier}, sku = ${sku}, quantity = ${quantity}, notes = ${notes}, cost = ${cost}, matches_reviewed = false
     where id = ${id}
   `
 
@@ -417,6 +419,31 @@ export async function applyBulkMaterialMatches(bulkMaterialId: string, inspectio
 export async function dismissBulkMaterialMatches(bulkMaterialId: string, inspectionId: string, _formData: FormData) {
   const sql = getSql()
   await sql`update inspection_bulk_materials set matches_reviewed = true where id = ${bulkMaterialId}`
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
+}
+
+// "Use Bulk Item" (Quote Sheet, per line item): the reviewer explicitly picks
+// a bulk material from a dropdown, rather than waiting on the auto-fill
+// banner's guess -- always available, unlike the banner which only fires
+// when the SKU text happens to match. Copies supplier/sku same as
+// applyBulkMaterialMatches, but is a direct reviewer choice so it overwrites
+// whatever was there rather than requiring blank fields first. Clears
+// materials_cost: once a line item draws from a shared bulk purchase, its own
+// per-item material cost isn't a separate real number -- the bulk item's own
+// `cost` (migration 0026) is where that $ amount lives instead. labor_hours
+// is untouched -- linking a materials source says nothing about the labor.
+export async function linkLineItemToBulkMaterial(lineItemId: string, inspectionId: string, formData: FormData) {
+  const bulkMaterialId = String(formData.get(`bulk_material_id__${lineItemId}`) ?? '')
+  if (!bulkMaterialId) return
+  const sql = getSql()
+  const [bm] = await sql`select supplier, sku from inspection_bulk_materials where id = ${bulkMaterialId}`
+  if (!bm) return
+
+  await sql`
+    update line_items
+    set supplier = ${bm.supplier}, sku = ${bm.sku}, materials_cost = null
+    where id = ${lineItemId}
+  `
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
 }
 
