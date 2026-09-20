@@ -490,7 +490,7 @@ export default async function QuoteSheetPage({
               </div>
               <div role="cell" className="col-span-full mt-1 pt-2 border-t border-border">
                 <div className="text-center text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1.5">
-                  Materials for This Section
+                  Materials for Above Section
                 </div>
                 <div className="flex flex-wrap items-end gap-2">
                 <div className="w-36">
@@ -518,6 +518,34 @@ export default async function QuoteSheetPage({
                     className={miniField}
                   />
                 </div>
+
+                {bulkMaterials.length > 0 && (
+                  <>
+                    <span className="text-[11px] text-text-muted">or</span>
+                    <select
+                      name={`bulk_material_id__${li.id}`}
+                      defaultValue=""
+                      className={`${miniField} w-40`}
+                    >
+                      <option value="" disabled>
+                        Choose bulk item…
+                      </option>
+                      {bulkMaterials.map((bm) => (
+                        <option key={bm.id} value={bm.id}>
+                          {bm.supplier ?? '—'} {bm.sku ?? ''}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="submit"
+                      formAction={linkLineItemToBulkMaterial.bind(null, li.id, id)}
+                      className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap"
+                    >
+                      Use Bulk Item
+                    </button>
+                  </>
+                )}
+
                 <LineItemMaterialsCost
                   id={li.id}
                   assignedTo={li.assigned_to}
@@ -545,33 +573,7 @@ export default async function QuoteSheetPage({
                   </div>
                 ))}
 
-                <AddLineItemSku lineItemId={li.id} inspectionId={id} />
-
-                {bulkMaterials.length > 0 && (
-                  <div className="flex items-end gap-1.5 pl-2 ml-1 border-l border-border">
-                    <select
-                      name={`bulk_material_id__${li.id}`}
-                      defaultValue=""
-                      className={`${miniField} text-[11px] w-40`}
-                    >
-                      <option value="" disabled>
-                        Choose bulk item…
-                      </option>
-                      {bulkMaterials.map((bm) => (
-                        <option key={bm.id} value={bm.id}>
-                          {bm.supplier ?? '—'} {bm.sku ?? ''}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="submit"
-                      formAction={linkLineItemToBulkMaterial.bind(null, li.id, id)}
-                      className="text-[10px] font-semibold text-text-muted hover:text-accent border border-border hover:border-accent rounded-[var(--radius-sm)] px-1.5 py-1 bg-surface whitespace-nowrap"
-                    >
-                      Use Bulk Item
-                    </button>
-                  </div>
-                )}
+                <AddLineItemSku lineItemId={li.id} inspectionId={id} bulkMaterials={bulkMaterials} />
                 </div>
               </div>
             </div>

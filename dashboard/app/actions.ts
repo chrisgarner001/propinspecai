@@ -325,6 +325,21 @@ export async function removeLineItemSku(id: string, inspectionId: string, _formD
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
 }
 
+// The "duplicated blank box" version of Add Item (AddLineItemSku.tsx): fills
+// a new additional-SKU row from a picked Bulk Material instead of typed
+// text, the same choice linkLineItemToBulkMaterial already gives the
+// line item's own primary Supplier/SKU. Called directly from a client
+// component, not a form -- a plain object arg like updateLineItemSchedule,
+// not FormData, since there's no form to read it from.
+export async function addLineItemSkuFromBulkMaterial(lineItemId: string, inspectionId: string, bulkMaterialId: string) {
+  const sql = getSql()
+  const [bm] = await sql`select supplier, sku from inspection_bulk_materials where id = ${bulkMaterialId}`
+  if (!bm) return
+
+  await sql`insert into line_item_additional_skus (line_item_id, supplier, sku) values (${lineItemId}, ${bm.supplier}, ${bm.sku})`
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
+}
+
 // Bulk materials (0023_sku_quantities_and_bulk_materials.sql) -- a purchase
 // used across many line items in the same job (a contractor pack of outlets
 // covering 8 separate outlet-replacement rows, a roll of window screen
