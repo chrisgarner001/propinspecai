@@ -8,7 +8,10 @@ import {
   removeLineItemSku,
   addBulkMaterial,
   removeBulkMaterial,
+  applyBulkMaterialMatches,
+  dismissBulkMaterialMatches,
 } from '@/app/actions'
+import { matchBulkMaterialCandidates } from '@/lib/bulkMatch'
 import AppShell from '@/app/components/AppShell'
 import LineItemAssignment from '@/app/components/LineItemAssignment'
 import RemoveSectionControl from '@/app/components/RemoveSectionControl'
@@ -46,7 +49,7 @@ function stageAnchor(key: string) {
 // Nfr, so a long unbroken cell can't force its track wider than its share
 // and desync this row's columns from the header row's.
 const ROW_COLS =
-  'grid-cols-[minmax(0,0.8fr)_minmax(0,1.3fr)_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.8fr)]'
+  'grid-cols-[minmax(0,0.8fr)_minmax(0,1.3fr)_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,1fr)]'
 
 type LineItem = {
   id: string
@@ -69,7 +72,14 @@ type LineItem = {
 type Vendor = { id: string; name: string }
 type Stage = { id: string; name: string; sort_order: number }
 type AdditionalSku = { id: string; line_item_id: string; supplier: string | null; sku: string | null; quantity: string | null }
-type BulkMaterial = { id: string; supplier: string | null; sku: string | null; quantity: string | null; notes: string | null }
+type BulkMaterial = {
+  id: string
+  supplier: string | null
+  sku: string | null
+  quantity: string | null
+  notes: string | null
+  matches_reviewed: boolean
+}
 
 export default async function QuoteSheetPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -102,10 +112,22 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
   }
 
   const bulkMaterials = (await sql`
-    select id, supplier, sku, quantity, notes from inspection_bulk_materials
+    select id, supplier, sku, quantity, notes, matches_reviewed from inspection_bulk_materials
     where inspection_id = ${id}
     order by created_at
   `) as unknown as BulkMaterial[]
+
+  // Bulk-item auto-fill (docs/designs/quote-sheet-bulk-item-auto-fill.md): a
+  // suggest-and-confirm banner, not a silent write -- computed here from data
+  // already on the page (same rule matchBulkMaterialCandidates uses server-side
+  // on Apply), so nothing changes on a real quote until the reviewer clicks
+  // Apply.
+  const bulkMatchCandidates = new Map<string, LineItem[]>()
+  for (const bm of bulkMaterials) {
+    if (bm.matches_reviewed) continue
+    const candidates = matchBulkMaterialCandidates(bm, lineItems)
+    if (candidates.length > 0) bulkMatchCandidates.set(bm.id, candidates as LineItem[])
+  }
 
   const stageSummary = [
     ...lineItems.reduce((map, li) => {
@@ -163,7 +185,7 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
               type="submit"
               className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
             >
-              Create Batches
+              Create Stages
             </button>
           </form>
           <a
@@ -222,7 +244,7 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
                   {bm.notes && <span className="text-text-muted"> — {bm.notes}</span>}
                 </span>
                 <form action={removeBulkMaterial.bind(null, bm.id, id)}>
-                  <button type="submit" title="Remove" className="text-[11px] text-text-muted hover:text-error leading-none">
+                  <button type="submit" title="Remove" className="text-[20px] leading-none font-bold text-error hover:text-error/70">
                     ×
                   </button>
                 </form>
@@ -257,11 +279,55 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
         </form>
       </div>
 
+      {[...bulkMatchCandidates.entries()].map(([bmId, candidates]) => {
+        const bm = bulkMaterials.find((b) => b.id === bmId)!
+        return (
+          <form
+            key={bmId}
+            action={applyBulkMaterialMatches.bind(null, bmId, id)}
+            className="px-6 py-3 border-b border-border bg-accent/5 space-y-2"
+          >
+            <div className="text-[12px]">
+              <span className="font-semibold">
+                Matched {candidates.length} item{candidates.length > 1 ? 's' : ''}
+              </span>{' '}
+              for bulk item <span className="font-semibold">{bm.supplier ?? bm.sku ?? 'this item'}</span> — apply its
+              Supplier/SKU to the ones checked below?
+            </div>
+            <div className="space-y-1">
+              {candidates.map((li) => (
+                <label key={li.id} className="flex items-center gap-2 text-[12px]">
+                  <input type="checkbox" name="apply_item_id" value={li.id} defaultChecked />
+                  <span>
+                    {li.room_area} — {li.item}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="submit"
+                className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
+              >
+                Apply
+              </button>
+              <button
+                type="submit"
+                formAction={dismissBulkMaterialMatches.bind(null, bmId, id)}
+                className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
+              >
+                Dismiss
+              </button>
+            </div>
+          </form>
+        )
+      })}
+
       <form action={updateQuoteSheetItems}>
         <input type="hidden" name="inspection_id" value={id} />
         <div role="table">
           <div role="row" className={`grid ${ROW_COLS} gap-2 px-3 py-2.5 border-b border-border`}>
-            {['Area', 'Details', 'Comments', 'Vendor/GPM', 'Materials', 'Labor (hrs)', 'Vendor Quote', 'Stage', 'Supplier/SKU'].map((h) => (
+            {['Area', 'Details', 'Comments', 'Vendor/GPM', 'Materials', 'Labor (hrs)', 'Vendor Quote', 'Stage'].map((h) => (
               <div key={h} role="columnheader" className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
                 {h}
               </div>
@@ -284,7 +350,7 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
               className={`relative grid ${ROW_COLS} gap-2 items-start px-3 pt-2.5 pb-7 border-b border-border scroll-mt-4`}
             >
               <input type="hidden" name="ids" value={li.id} />
-              <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1.5">
+              <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1.5">
                 <RemoveSectionControl id={li.id} />
                 <button
                   type="submit"
@@ -336,31 +402,42 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
                   ))}
                 </select>
               </div>
-              <div role="cell" className="min-w-0 space-y-1">
-                <input
-                  name={`supplier__${li.id}`}
-                  defaultValue={li.supplier ?? ''}
-                  placeholder="Supplier"
-                  className={miniField}
-                />
-                <div className="flex items-center gap-1">
+              <div role="cell" className="col-span-full flex flex-wrap items-end gap-2 mt-1 pt-2 pb-1 border-t border-border">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted pb-1.5">
+                  Supplier/SKU
+                </span>
+                <div className="w-36">
+                  <input
+                    name={`supplier__${li.id}`}
+                    defaultValue={li.supplier ?? ''}
+                    placeholder="Supplier"
+                    className={miniField}
+                  />
+                </div>
+                <div className="w-28">
                   <input
                     name={`sku__${li.id}`}
                     defaultValue={li.sku ?? ''}
                     placeholder="SKU"
-                    className={`${miniField} data-mono flex-1`}
+                    className={`${miniField} data-mono`}
                   />
+                </div>
+                <div className="w-16">
                   <input
                     name={`sku_quantity__${li.id}`}
                     defaultValue={li.sku_quantity ?? ''}
                     placeholder="Qty"
                     title="Quantity"
-                    className={`${miniField} w-12 shrink-0`}
+                    className={miniField}
                   />
                 </div>
+
                 {(additionalSkusByItem.get(li.id) ?? []).map((row) => (
-                  <div key={row.id} className="flex items-center gap-1">
-                    <span className="text-[11px] text-text-muted truncate flex-1" title={`${row.supplier ?? '—'} ${row.sku ?? ''}`}>
+                  <div
+                    key={row.id}
+                    className="flex items-center gap-1.5 bg-surface-alt border border-border rounded-[var(--radius-sm)] pl-2 pr-1.5 py-1"
+                  >
+                    <span className="text-[11px] text-text-muted truncate max-w-[180px]" title={`${row.supplier ?? '—'} ${row.sku ?? ''}`}>
                       {row.supplier ?? '—'} <span className="data-mono">{row.sku ?? ''}</span>
                       {row.quantity && <span> · Qty {row.quantity}</span>}
                     </span>
@@ -374,32 +451,31 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
                     </button>
                   </div>
                 ))}
-                <div className="pt-1 border-t border-border space-y-1">
+
+                <div className="flex items-end gap-1.5 pl-2 ml-1 border-l border-border">
                   <input
                     name={`new_sku_supplier__${li.id}`}
                     placeholder="+ Supplier"
-                    className={`${miniField} text-[11px]`}
+                    className={`${miniField} text-[11px] w-28`}
                   />
-                  <div className="flex items-center gap-1">
-                    <input
-                      name={`new_sku__${li.id}`}
-                      placeholder="SKU"
-                      className={`${miniField} data-mono text-[11px] flex-1`}
-                    />
-                    <input
-                      name={`new_sku_quantity__${li.id}`}
-                      placeholder="Qty"
-                      title="Quantity"
-                      className={`${miniField} text-[11px] w-10 shrink-0`}
-                    />
-                    <button
-                      type="submit"
-                      formAction={addLineItemSku.bind(null, li.id, id)}
-                      className="text-[10px] font-semibold text-text-muted hover:text-accent border border-border hover:border-accent rounded-[var(--radius-sm)] px-1.5 py-1 bg-surface whitespace-nowrap"
-                    >
-                      Add
-                    </button>
-                  </div>
+                  <input
+                    name={`new_sku__${li.id}`}
+                    placeholder="SKU"
+                    className={`${miniField} data-mono text-[11px] w-24`}
+                  />
+                  <input
+                    name={`new_sku_quantity__${li.id}`}
+                    placeholder="Qty"
+                    title="Quantity"
+                    className={`${miniField} text-[11px] w-12`}
+                  />
+                  <button
+                    type="submit"
+                    formAction={addLineItemSku.bind(null, li.id, id)}
+                    className="text-[10px] font-semibold text-text-muted hover:text-accent border border-border hover:border-accent rounded-[var(--radius-sm)] px-1.5 py-1 bg-surface whitespace-nowrap"
+                  >
+                    Add
+                  </button>
                 </div>
               </div>
             </div>

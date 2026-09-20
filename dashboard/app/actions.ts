@@ -361,6 +361,37 @@ export async function removeBulkMaterial(id: string, inspectionId: string, _form
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
 }
 
+// Bulk-item auto-fill (docs/designs/quote-sheet-bulk-item-auto-fill.md, v1
+// wedge of "Auto Process Quote"): the Quote Sheet page computes candidate
+// line-item matches for review (matchBulkMaterialCandidates, lib/bulkMatch.ts
+// -- shared so the page's render-time computation and this apply step agree
+// on the same rule), shows them in a confirm banner, and only THIS action --
+// fired by an explicit reviewer click -- ever writes to a line item's
+// Supplier/SKU. Never silent, and re-checks the blank-field guard
+// server-side even though the banner only offers items that were blank at
+// render time, in case the sheet was edited in another tab since.
+export async function applyBulkMaterialMatches(bulkMaterialId: string, inspectionId: string, formData: FormData) {
+  const sql = getSql()
+  const lineItemIds = formData.getAll('apply_item_id').map(String)
+  const [bm] = await sql`select supplier, sku, quantity from inspection_bulk_materials where id = ${bulkMaterialId}`
+  if (bm && lineItemIds.length > 0) {
+    await sql`
+      update line_items
+      set supplier = ${bm.supplier}, sku = ${bm.sku}, sku_quantity = ${bm.quantity}
+      where id in ${sql(lineItemIds)} and supplier is null and sku is null
+    `
+  }
+  await sql`update inspection_bulk_materials set matches_reviewed = true where id = ${bulkMaterialId}`
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, id, inspectionId) call site; formAction always passes the triggering form's FormData last
+export async function dismissBulkMaterialMatches(bulkMaterialId: string, inspectionId: string, _formData: FormData) {
+  const sql = getSql()
+  await sql`update inspection_bulk_materials set matches_reviewed = true where id = ${bulkMaterialId}`
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
+}
+
 // Called directly from the Job Timeline's client component (drag-end commit,
 // or the keyboard-accessible plain date inputs) -- not a form action, so it
 // takes a plain object rather than FormData. Always sets all 4 fields
