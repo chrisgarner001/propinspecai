@@ -26,25 +26,25 @@ export default function LineItemMaterialsCost({
 
   return (
     <>
-      <div className="w-24">
-        <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">
-          Materials $
-        </label>
+      <div className="w-16">
         <input
           name={`materials_cost__${id}`}
           type="number"
           step="5"
           defaultValue={materialsCost ?? ''}
           disabled={!selfPerformed}
-          placeholder="—"
+          placeholder="$"
+          title="Materials $"
           className={costField}
         />
       </div>
-      <div className="w-28">
-        <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">
-          Labor (hrs)
-        </label>
-        <LaborHoursInput name={`labor_hours__${id}`} defaultValue={laborHours} disabled={!selfPerformed} />
+      <div className="w-16">
+        <LaborHoursInput
+          name={`labor_hours__${id}`}
+          defaultValue={laborHours}
+          disabled={!selfPerformed}
+          placeholder="hrs"
+        />
       </div>
     </>
   )

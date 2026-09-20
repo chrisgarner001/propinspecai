@@ -7,6 +7,7 @@ export default function LaborHoursInput({
   defaultValue,
   disabled,
   onValueChange,
+  placeholder = '—',
 }: {
   // Optional: AddLineItemSku.tsx doesn't submit this input by name at all
   // (it reads the value via onValueChange and sets it into a FormData entry
@@ -16,6 +17,7 @@ export default function LaborHoursInput({
   defaultValue: string | null
   disabled: boolean
   onValueChange?: (value: string) => void
+  placeholder?: string
 }) {
   const [hours, setHours] = useState(defaultValue ?? '')
 
@@ -32,7 +34,8 @@ export default function LaborHoursInput({
       value={hours}
       onChange={handleChange}
       disabled={disabled}
-      placeholder="—"
+      placeholder={placeholder}
+      title={placeholder}
       className="data-mono border border-border rounded-[var(--radius-sm)] px-2 py-1 w-full min-w-0 bg-surface disabled:bg-surface-alt disabled:text-text-muted"
     />
   )

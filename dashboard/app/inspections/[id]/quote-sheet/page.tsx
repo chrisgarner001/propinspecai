@@ -176,6 +176,9 @@ export default async function QuoteSheetPage({
   const laborRate = Number(settings?.gpm_labor_charge ?? 0)
 
   const totalHours = lineItems.reduce((sum, li) => sum + (li.labor_hours !== null ? Number(li.labor_hours) : 0), 0)
+  const totalMaterials =
+    lineItems.reduce((sum, li) => sum + Number(li.materials_cost ?? 0), 0) +
+    additionalSkus.reduce((sum, row) => sum + Number(row.materials_cost ?? 0), 0)
 
   return (
     <AppShell active="/" title={`Quote Sheet — ${inspection.property_address}`} wide>
@@ -183,6 +186,7 @@ export default async function QuoteSheetPage({
         <div className="flex items-center gap-3">
           <div className="text-[13px] text-text-muted">
             {inspection.property_address} · Job <span className="data-mono">{inspection.job_number}</span> ·{' '}
+            <span className="data-mono">${totalMaterials.toFixed(2)}</span> materials total ·{' '}
             <span className="data-mono">{totalHours.toFixed(2)}</span> labor hrs total
           </div>
           <div className="flex items-center gap-2">
@@ -236,7 +240,11 @@ export default async function QuoteSheetPage({
         <div className="flex flex-wrap gap-x-4 gap-y-1 px-6 py-2 border-b border-border bg-surface-alt text-[12px]">
           <span className="font-semibold text-text-muted uppercase tracking-wide text-[11px]">Stages</span>
           {stageSummary.map(([key, count]) => (
-            <a key={key} href={`#${stageAnchor(key)}`} className="text-text-muted hover:text-accent hover:underline">
+            <a
+              key={key}
+              href={`#${stageAnchor(key)}`}
+              className="text-[12px] font-semibold text-accent underline decoration-accent/40 hover:text-accent-hover"
+            >
               {key === 'unassigned' ? 'Unassigned' : (stageById.get(key)?.name ?? 'Unknown stage')} ({count})
             </a>
           ))}
@@ -440,11 +448,13 @@ export default async function QuoteSheetPage({
               className={`grid ${ROW_COLS} gap-2 items-start px-3 pt-2.5 pb-2.5 border-b border-border scroll-mt-4`}
             >
               <input type="hidden" name="ids" value={li.id} />
-              <div role="cell" className="min-w-0">
-                <input name={`room_area__${li.id}`} defaultValue={li.room_area} className={miniField} />
+              <input type="hidden" name={`room_area__${li.id}`} value={li.room_area} />
+              <input type="hidden" name={`item__${li.id}`} value={li.item} />
+              <div role="cell" className="min-w-0 text-[12px] px-1.5 py-1 truncate" title={li.room_area}>
+                {li.room_area}
               </div>
-              <div role="cell" className="min-w-0">
-                <input name={`item__${li.id}`} defaultValue={li.item} className={`${miniField} font-semibold`} />
+              <div role="cell" className="min-w-0 text-[12px] font-semibold px-1.5 py-1 truncate" title={li.item}>
+                {li.item}
               </div>
               <div role="cell" className="min-w-0 space-y-1">
                 <textarea
@@ -499,40 +509,41 @@ export default async function QuoteSheetPage({
                   Duplicate
                 </button>
               </div>
-              <div role="cell" className="col-span-full mt-1 -mx-3 px-3 pt-2 pb-3 border-t border-border bg-surface-alt space-y-2">
+              <div role="cell" className="col-span-full mt-1 -mx-3 px-3 pt-2 pb-3 border-t border-border bg-accent/5 space-y-2">
                 <div className="text-center text-[10px] font-semibold uppercase tracking-wide text-text-muted">
                   Materials for Above Section
                 </div>
 
-                <div className="flex flex-wrap items-end justify-between gap-2">
-                  <div className="flex items-end gap-2">
-                    <div className="w-36">
-                      <input
-                        name={`supplier__${li.id}`}
-                        defaultValue={li.supplier ?? ''}
-                        placeholder="Supplier"
-                        className={miniField}
-                      />
-                    </div>
-                    <div className="w-28">
-                      <input
-                        name={`sku__${li.id}`}
-                        defaultValue={li.sku ?? ''}
-                        placeholder="SKU"
-                        className={`${miniField} data-mono`}
-                      />
-                    </div>
-                    <div className="w-16">
-                      <input
-                        name={`sku_quantity__${li.id}`}
-                        defaultValue={li.sku_quantity ?? ''}
-                        placeholder="Qty"
-                        title="Quantity"
-                        className={miniField}
-                      />
-                    </div>
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="w-36">
+                    <input
+                      key={`supplier-${li.id}-${li.supplier ?? ''}`}
+                      name={`supplier__${li.id}`}
+                      defaultValue={li.supplier ?? ''}
+                      placeholder="Supplier"
+                      className={miniField}
+                    />
+                  </div>
+                  <div className="w-28">
+                    <input
+                      key={`sku-${li.id}-${li.sku ?? ''}`}
+                      name={`sku__${li.id}`}
+                      defaultValue={li.sku ?? ''}
+                      placeholder="SKU"
+                      className={`${miniField} data-mono`}
+                    />
+                  </div>
+                  <div className="w-16">
+                    <input
+                      name={`sku_quantity__${li.id}`}
+                      defaultValue={li.sku_quantity ?? ''}
+                      placeholder="Qty"
+                      title="Quantity"
+                      className={miniField}
+                    />
                   </div>
                   <LineItemMaterialsCost
+                    key={`cost-${li.id}-${li.materials_cost ?? ''}-${li.labor_hours ?? ''}`}
                     id={li.id}
                     assignedTo={li.assigned_to}
                     materialsCost={li.materials_cost}
@@ -548,51 +559,42 @@ export default async function QuoteSheetPage({
                 )}
 
                 {(additionalSkusByItem.get(li.id) ?? []).map((row) => (
-                  <div key={row.id} className="flex flex-wrap items-end justify-between gap-2 pt-2 border-t border-border">
-                    <div className="flex items-end gap-2">
-                      <div className="w-36">
-                        <input disabled defaultValue={row.supplier ?? ''} placeholder="Supplier" className={miniField} />
-                      </div>
-                      <div className="w-28">
-                        <input disabled defaultValue={row.sku ?? ''} placeholder="SKU" className={`${miniField} data-mono`} />
-                      </div>
-                      <div className="w-16">
-                        <input disabled defaultValue={row.quantity ?? ''} placeholder="Qty" title="Quantity" className={miniField} />
-                      </div>
+                  <div key={row.id} className="flex flex-wrap items-end gap-3 pt-2 border-t border-border">
+                    <div className="w-36">
+                      <input disabled defaultValue={row.supplier ?? ''} placeholder="Supplier" className={miniField} />
                     </div>
-                    <div className="flex items-end gap-2">
-                      <div className="w-24">
-                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">
-                          Materials $
-                        </label>
-                        <input
-                          disabled
-                          defaultValue={row.materials_cost ?? ''}
-                          placeholder="—"
-                          className={`${miniField} data-mono`}
-                        />
-                      </div>
-                      <div className="w-28">
-                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">
-                          Labor (hrs)
-                        </label>
-                        <input
-                          disabled
-                          defaultValue={row.labor_hours ?? ''}
-                          placeholder="—"
-                          className={`${miniField} data-mono`}
-                        />
-                      </div>
-                      <form action={removeLineItemSku.bind(null, row.id, id)}>
-                        <button
-                          type="submit"
-                          title="Remove this item"
-                          className="text-[16px] leading-none font-bold text-error hover:text-error/70 pb-1.5"
-                        >
-                          ×
-                        </button>
-                      </form>
+                    <div className="w-28">
+                      <input disabled defaultValue={row.sku ?? ''} placeholder="SKU" className={`${miniField} data-mono`} />
                     </div>
+                    <div className="w-16">
+                      <input disabled defaultValue={row.quantity ?? ''} placeholder="Qty" title="Quantity" className={miniField} />
+                    </div>
+                    <div className="w-16">
+                      <input
+                        disabled
+                        defaultValue={row.materials_cost ?? ''}
+                        placeholder="$"
+                        title="Materials $"
+                        className={`${miniField} data-mono`}
+                      />
+                    </div>
+                    <div className="w-16">
+                      <input
+                        disabled
+                        defaultValue={row.labor_hours ?? ''}
+                        placeholder="hrs"
+                        title="Labor hrs"
+                        className={`${miniField} data-mono`}
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      formAction={removeLineItemSku.bind(null, row.id, id)}
+                      title="Remove this item"
+                      className="text-[16px] leading-none font-bold text-error hover:text-error/70"
+                    >
+                      ×
+                    </button>
                   </div>
                 ))}
 

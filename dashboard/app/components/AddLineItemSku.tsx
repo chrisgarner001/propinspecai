@@ -107,35 +107,35 @@ export default function AddLineItemSku({
 
   return (
     <div className="w-full pt-2 mt-1 border-t border-border space-y-2">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div className="flex items-end gap-2">
-          <div className="w-36">
-            <input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="Supplier" className={miniField} />
-          </div>
-          <div className="w-28">
-            <input value={sku} onChange={(e) => setSku(e.target.value)} placeholder="SKU" className={`${miniField} data-mono`} />
-          </div>
-          <div className="w-16">
-            <input value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="Qty" title="Quantity" className={miniField} />
-          </div>
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="w-36">
+          <input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="Supplier" className={miniField} />
         </div>
-        <div className="flex items-end gap-2">
-          <div className="w-24">
-            <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">Materials $</label>
-            <input
-              value={materialsCost}
-              onChange={(e) => setMaterialsCost(e.target.value)}
-              type="number"
-              step="5"
-              disabled={!selfPerformed}
-              placeholder="—"
-              className={costField}
-            />
-          </div>
-          <div className="w-28">
-            <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">Labor (hrs)</label>
-            <LaborHoursInput defaultValue={laborHours} disabled={!selfPerformed} onValueChange={setLaborHours} />
-          </div>
+        <div className="w-28">
+          <input value={sku} onChange={(e) => setSku(e.target.value)} placeholder="SKU" className={`${miniField} data-mono`} />
+        </div>
+        <div className="w-16">
+          <input value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="Qty" title="Quantity" className={miniField} />
+        </div>
+        <div className="w-16">
+          <input
+            value={materialsCost}
+            onChange={(e) => setMaterialsCost(e.target.value)}
+            type="number"
+            step="5"
+            disabled={!selfPerformed}
+            placeholder="$"
+            title="Materials $"
+            className={costField}
+          />
+        </div>
+        <div className="w-16">
+          <LaborHoursInput
+            defaultValue={laborHours}
+            disabled={!selfPerformed}
+            onValueChange={setLaborHours}
+            placeholder="hrs"
+          />
         </div>
       </div>
 
