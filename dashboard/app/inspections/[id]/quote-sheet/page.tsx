@@ -4,7 +4,6 @@ import {
   updateQuoteSheetItems,
   createBatches,
   duplicateLineItem,
-  addLineItemSku,
   removeLineItemSku,
   addBulkMaterial,
   removeBulkMaterial,
@@ -15,6 +14,7 @@ import {
 } from '@/app/actions'
 import { matchBulkMaterialCandidates } from '@/lib/bulkMatch'
 import AppShell from '@/app/components/AppShell'
+import AddLineItemSku from '@/app/components/AddLineItemSku'
 import LineItemVendorAssignment from '@/app/components/LineItemVendorAssignment'
 import LineItemMaterialsCost from '@/app/components/LineItemMaterialsCost'
 import RemoveSectionControl from '@/app/components/RemoveSectionControl'
@@ -523,7 +523,6 @@ export default async function QuoteSheetPage({
                   assignedTo={li.assigned_to}
                   materialsCost={li.materials_cost}
                   laborHours={li.labor_hours}
-                  laborRate={laborRate}
                 />
 
                 {(additionalSkusByItem.get(li.id) ?? []).map((row) => (
@@ -546,31 +545,7 @@ export default async function QuoteSheetPage({
                   </div>
                 ))}
 
-                <div className="flex items-end gap-1.5 pl-2 ml-1 border-l border-border">
-                  <input
-                    name={`new_sku_supplier__${li.id}`}
-                    placeholder="+ Supplier"
-                    className={`${miniField} text-[11px] w-28`}
-                  />
-                  <input
-                    name={`new_sku__${li.id}`}
-                    placeholder="SKU"
-                    className={`${miniField} data-mono text-[11px] w-24`}
-                  />
-                  <input
-                    name={`new_sku_quantity__${li.id}`}
-                    placeholder="Qty"
-                    title="Quantity"
-                    className={`${miniField} text-[11px] w-12`}
-                  />
-                  <button
-                    type="submit"
-                    formAction={addLineItemSku.bind(null, li.id, id)}
-                    className="text-[10px] font-semibold text-text-muted hover:text-accent border border-border hover:border-accent rounded-[var(--radius-sm)] px-1.5 py-1 bg-surface whitespace-nowrap"
-                  >
-                    Add Item
-                  </button>
-                </div>
+                <AddLineItemSku lineItemId={li.id} inspectionId={id} />
 
                 {bulkMaterials.length > 0 && (
                   <div className="flex items-end gap-1.5 pl-2 ml-1 border-l border-border">

@@ -17,13 +17,18 @@ function toNumberOrNull(value: FormDataEntryValue | null): number | null {
   return Number.isNaN(n) ? null : n
 }
 
+// Assigned To / Materials / Labor / Vendor Est. used to be editable from this
+// page's table too, until the reviewer pointed out cost assignment already
+// happens on the Quote Sheet page and asked for these removed here entirely
+// (2026-09-20) -- removing the SET clauses below, not just the form inputs,
+// matters: this action ran unconditionally on every save, and with the
+// inputs gone but the columns still being written, every save from this page
+// would have silently wiped assigned_to/materials_cost/labor_hours/
+// labor_cost/vendor_estimated_cost/vendor_id to null on every line item.
 export async function bulkUpdateLineItems(formData: FormData) {
   const sql = getSql()
   const inspectionId = String(formData.get('inspection_id'))
   const ids = formData.getAll('ids').map(String)
-
-  const [settings] = await sql`select gpm_labor_charge from settings where id = true`
-  const laborRate = Number(settings?.gpm_labor_charge ?? 0)
 
   for (const id of ids) {
     if (formData.get(`remove__${id}`) === '1') {
@@ -34,18 +39,10 @@ export async function bulkUpdateLineItems(formData: FormData) {
     const roomArea = String(formData.get(`room_area__${id}`) ?? '')
     const item = String(formData.get(`item__${id}`) ?? '')
     const condition = String(formData.get(`condition__${id}`) ?? '')
-    const assignedToRaw = formData.get(`assigned_to__${id}`)
-    const assignedTo = assignedToRaw ? String(assignedToRaw) : null
     const recommendedAction = String(formData.get(`recommended_action__${id}`) ?? '')
     const observedEvidenceRaw = formData.get(`observed_evidence__${id}`)
     const observedEvidence = observedEvidenceRaw ? String(observedEvidenceRaw) : null
-    const materialsCost = toNumberOrNull(formData.get(`materials_cost__${id}`))
-    const laborHours = toNumberOrNull(formData.get(`labor_hours__${id}`))
-    const laborCost = laborHours !== null ? laborHours * laborRate : null
-    const vendorEstimatedCost = toNumberOrNull(formData.get(`vendor_estimated_cost__${id}`))
     const tenantApproved = formData.get(`tenant_approved__${id}`) !== null
-    const vendorIdRaw = formData.get(`vendor_id__${id}`)
-    const vendorId = vendorIdRaw ? String(vendorIdRaw) : null
 
     await sql`
       update line_items
@@ -53,15 +50,9 @@ export async function bulkUpdateLineItems(formData: FormData) {
         room_area = ${roomArea},
         item = ${item},
         condition = ${condition},
-        assigned_to = ${assignedTo},
         recommended_action = ${recommendedAction},
         observed_evidence = ${observedEvidence},
-        materials_cost = ${materialsCost},
-        labor_hours = ${laborHours},
-        labor_cost = ${laborCost},
-        vendor_estimated_cost = ${vendorEstimatedCost},
-        tenant_approved = ${tenantApproved},
-        vendor_id = ${vendorId}
+        tenant_approved = ${tenantApproved}
       where id = ${id}
     `
   }

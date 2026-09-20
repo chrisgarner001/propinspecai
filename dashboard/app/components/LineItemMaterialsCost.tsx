@@ -15,13 +15,11 @@ export default function LineItemMaterialsCost({
   assignedTo: initialAssignedTo,
   materialsCost,
   laborHours,
-  laborRate,
 }: {
   id: string
   assignedTo: string | null
   materialsCost: string | null
   laborHours: string | null
-  laborRate: number
 }) {
   const [assignedTo] = useState(initialAssignedTo ?? '')
   const selfPerformed = assignedTo === 'GPM Staff' || assignedTo === 'Other'
@@ -46,7 +44,7 @@ export default function LineItemMaterialsCost({
         <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">
           Labor (hrs)
         </label>
-        <LaborHoursInput name={`labor_hours__${id}`} defaultValue={laborHours} rate={laborRate} disabled={!selfPerformed} />
+        <LaborHoursInput name={`labor_hours__${id}`} defaultValue={laborHours} disabled={!selfPerformed} />
       </div>
     </>
   )

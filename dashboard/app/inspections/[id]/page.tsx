@@ -4,7 +4,6 @@ import { notFound } from 'next/navigation'
 import AppShell from '@/app/components/AppShell'
 import StatusSelect from '@/app/components/StatusSelect'
 import EvidenceStill from '@/app/components/EvidenceStill'
-import LineItemAssignment from '@/app/components/LineItemAssignment'
 import NewLineItemAssignedTo from '@/app/components/NewLineItemAssignedTo'
 import VideoPopupLink from '@/app/components/VideoPopupLink'
 import DeleteInspectionButton from '@/app/components/DeleteInspectionButton'
@@ -40,20 +39,14 @@ type LineItem = {
   item: string
   condition: string
   observed_evidence: string | null
-  assigned_to: string | null
   trade_category: string | null
   recommended_action: string | null
   priority: string | null
-  materials_cost: string | null
-  labor_hours: string | null
-  labor_cost: string | null
-  vendor_estimated_cost: string | null
   tenant_approved: boolean
   is_manual_addition: boolean
   source_video_file: string | null
   source_video_drive_file_id: string | null
   still_image_file: string | null
-  vendor_id: string | null
 }
 
 type Vendor = { id: string; name: string }
@@ -64,7 +57,7 @@ type Vendor = { id: string; name: string }
 // independent grid container -- desyncs that row's column edges from the
 // header row's. minmax(0, ...) caps growth to the fr share so overflowing
 // content wraps/truncates inside the cell instead of pushing columns right.
-const ROW_COLS = 'grid-cols-[minmax(0,2fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,0.9fr)]'
+const ROW_COLS = 'grid-cols-[minmax(0,2fr)_minmax(0,0.8fr)_minmax(0,0.9fr)]'
 
 export default async function InspectionPage({
   params,
@@ -94,9 +87,6 @@ export default async function InspectionPage({
     from inspection_videos where inspection_id = ${id} order by created_at
   `) as unknown as InspectionVideoRow[]
 
-  const [settings] = await sql`select gpm_labor_charge from settings where id = true`
-  const laborRate = Number(settings?.gpm_labor_charge ?? 0)
-
   const quoteActionsVisible = QUOTE_ACTIONS_VISIBLE_STATUSES.includes(inspection.status)
 
   const linkClass =
@@ -108,24 +98,31 @@ export default async function InspectionPage({
       title={inspection.property_address}
       wide
       headerContent={
-        <div className="flex items-center gap-4 flex-wrap min-w-0">
-          <h1 className="font-display font-bold text-[17px] truncate">
-            Property: {inspection.property_address}
-          </h1>
-          <div className="text-[13px] text-text-muted whitespace-nowrap">
-            Job <span className="data-mono">{inspection.job_number}</span>
+        <>
+          <div className="flex items-center gap-4 flex-wrap min-w-0">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-text-muted whitespace-nowrap">
+              Inspection Report
+            </span>
+            <h1 className="font-display font-bold text-[17px] truncate">
+              Property: {inspection.property_address}
+            </h1>
+            <div className="text-[13px] text-text-muted whitespace-nowrap">
+              Job <span className="data-mono">{inspection.job_number}</span>
+            </div>
+            <div className="text-[13px] text-text-muted whitespace-nowrap">Inspector: {inspection.inspector_name}</div>
+            <div className="text-[13px] text-text-muted data-mono whitespace-nowrap">
+              {new Date(inspection.inspection_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}
+            </div>
           </div>
-          <div className="text-[13px] text-text-muted whitespace-nowrap">Inspector: {inspection.inspector_name}</div>
-          <div className="text-[13px] text-text-muted data-mono whitespace-nowrap">
-            {new Date(inspection.inspection_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">Status</span>
+            <StatusSelect inspectionId={id} status={inspection.status} />
           </div>
-        </div>
+        </>
       }
     >
       <div className="flex items-center justify-between gap-2 px-6 py-3 border-b border-border bg-surface-alt flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">Status</span>
-          <StatusSelect inspectionId={id} status={inspection.status} />
           <a href={`/inspections/${id}/chargeback-review`} className={linkClass}>
             Tenant Chargeback Review
           </a>
@@ -227,7 +224,7 @@ export default async function InspectionPage({
             role="row"
             className={`grid ${ROW_COLS} gap-2 px-3 py-2.5 border-b border-border`}
           >
-            {['Item', 'Condition', 'Assigned To', 'Materials', 'Labor (hrs)', 'Vendor Est.', 'Remove from Quote Sheet'].map(
+            {['Item', 'Condition', 'Remove from Quote Sheet'].map(
               (h) => (
                 <div
                   key={h}
@@ -311,16 +308,6 @@ export default async function InspectionPage({
                   ))}
                 </select>
               </div>
-              <LineItemAssignment
-                id={li.id}
-                assignedTo={li.assigned_to}
-                vendorId={li.vendor_id}
-                vendors={vendors}
-                materialsCost={li.materials_cost}
-                laborHours={li.labor_hours}
-                laborRate={laborRate}
-                vendorEstimatedCost={li.vendor_estimated_cost}
-              />
               <div role="cell" className="min-w-0 flex justify-center">
                 <input
                   type="checkbox"

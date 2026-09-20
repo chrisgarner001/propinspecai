@@ -1,12 +1,11 @@
 import { getSql } from '@/lib/db'
 import { notFound } from 'next/navigation'
-import { sendBatchToPW } from '@/app/actions'
 import AppShell from '@/app/components/AppShell'
 
 // Read-only grouped view of the Quote Sheet's batches -- reassigning which
 // batch an item belongs to happens back on the Regular View (via its Stage
-// picker + "Create Batches"), not here. This view exists to (a) see each
-// batch as a unit before sending it out, and (b) send it to PropertyWare.
+// picker + "Create Batches"), not here. This view exists to see each batch
+// as a unit before sending it out.
 //
 // A batch is still keyed by batch_number under the hood (see
 // 0018_manual_batch_numbering.sql / 0019_stages.sql) -- one work order per
@@ -15,13 +14,11 @@ import AppShell from '@/app/components/AppShell'
 // Stage instead of the raw number, matching the Quote Sheet and Job
 // Timeline.
 //
-// "Send to PW" is a STAND-IN for the real PropertyWare API integration --
-// no PW API credentials/endpoint docs were available when this was built.
-// It records a manually-typed PW work order number instead of actually
-// calling PropertyWare. Swap in the real call in app/actions.ts's
-// sendBatchToPW later; this page's form shape (submit a pw_work_order_number)
-// can stay the same, or become a real "Send" button once the API assigns
-// the number automatically.
+// "Send to PW" (the manually-typed work-order-number stand-in for a real
+// PropertyWare API integration) was removed from this page's UI on user
+// request (2026-09-20, not pursuing that workflow yet) -- app/actions.ts's
+// sendBatchToPW and the work_order_batches table are left in place, not
+// deleted, since this is a "not now" deferral, not a decision to abandon it.
 
 type LineItem = {
   id: string
@@ -38,7 +35,6 @@ type LineItem = {
 
 type Vendor = { id: string; name: string }
 type Stage = { id: string; name: string; sort_order: number }
-type BatchMeta = { batch_number: number; pw_work_order_number: string | null }
 
 export default async function QuoteSheetStagesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -59,10 +55,6 @@ export default async function QuoteSheetStagesPage({ params }: { params: Promise
 
   const stages = (await sql`select id, name, sort_order from stages order by sort_order`) as unknown as Stage[]
   const stageById = new Map(stages.map((s) => [s.id, s]))
-
-  const batchMeta = (await sql`
-    select batch_number, pw_work_order_number from work_order_batches where inspection_id = ${id}
-  `) as unknown as BatchMeta[]
 
   const batches = new Map<number, LineItem[]>()
   const unbatched: LineItem[] = []
@@ -127,7 +119,6 @@ export default async function QuoteSheetStagesPage({ params }: { params: Promise
       )}
 
       {orderedBatches.map(([batchNumber, items]) => {
-        const meta = batchMeta.find((m) => m.batch_number === batchNumber)
         const total = items.reduce((sum, li) => sum + lineTotal(li), 0)
         return (
           <div key={batchNumber} className="border-b border-border">
@@ -146,24 +137,6 @@ export default async function QuoteSheetStagesPage({ params }: { params: Promise
                 >
                   Take-Off Sheet
                 </a>
-                {meta?.pw_work_order_number ? (
-                  <div className="text-[12px] font-semibold text-success">PW WO# {meta.pw_work_order_number}</div>
-                ) : (
-                  <form action={sendBatchToPW.bind(null, id, batchNumber)} className="flex items-center gap-2">
-                    <input
-                      name="pw_work_order_number"
-                      required
-                      placeholder="PW work order #"
-                      className="text-[12px] border border-border rounded-[var(--radius-sm)] px-2 py-1 bg-surface w-36"
-                    />
-                    <button
-                      type="submit"
-                      className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap"
-                    >
-                      Send to PW
-                    </button>
-                  </form>
-                )}
               </div>
             </div>
             <table className="w-full text-[13px] border-collapse">
