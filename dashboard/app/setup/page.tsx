@@ -23,7 +23,7 @@ export default async function SetupPage() {
   const vendors = (await sql`select id, name from vendors order by name`) as unknown as Vendor[]
 
   return (
-    <AppShell active="/setup" reviewerName="Jessica Zilka" title="Set Up">
+    <AppShell active="/setup" title="Set Up">
       <form action={updateSettings} className="p-6 max-w-xl space-y-6">
         <div className="flex items-center justify-between gap-6 pb-4 border-b border-border">
           <div>

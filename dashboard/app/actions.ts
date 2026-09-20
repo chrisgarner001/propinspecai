@@ -279,16 +279,19 @@ export async function duplicateLineItem(id: string, inspectionId: string, _formD
   // inheritance via SELECT *. excluded_from_quote_sheet is likewise omitted
   // (defaults to false) for the same reason -- a duplicate should appear in
   // the Quote Sheet even if the original was excluded from it. stage_id and
-  // supplier/sku ARE copied, unlike those: a duplicate exists because the
-  // same repair needs a second instance, which usually means the same Stage
-  // and the same materials source as a starting point.
+  // supplier/sku/sku_quantity ARE copied, unlike those: a duplicate exists
+  // because the same repair needs a second instance, which usually means the
+  // same Stage and the same materials source (including quantity) as a
+  // starting point. sku_quantity was omitted here until 2026-09-20 -- a real
+  // gap this exact pattern warns about (added in migration 0023, after this
+  // function was last written) -- silently dropping it on every duplicate.
   await sql`
     insert into line_items (
       inspection_id, room_area, item, condition, observed_evidence, assigned_to,
       trade_category, recommended_action, priority, materials_cost, labor_hours,
       labor_cost, vendor_estimated_cost, tenant_charge, tenant_charge_amount, tenant_approved, is_manual_addition,
       source_timestamp, source_video_file, source_video_drive_file_id, still_image_file, vendor_id,
-      stage_id, supplier, sku, created_at
+      stage_id, supplier, sku, sku_quantity, created_at
     )
     values (
       ${original.inspection_id}, ${original.room_area}, ${original.item}, ${original.condition},
@@ -297,7 +300,7 @@ export async function duplicateLineItem(id: string, inspectionId: string, _formD
       ${original.labor_hours}, ${original.labor_cost}, ${original.vendor_estimated_cost},
       ${original.tenant_charge}, ${original.tenant_charge_amount}, ${original.tenant_approved}, true,
       ${original.source_timestamp}, ${original.source_video_file}, ${original.source_video_drive_file_id}, ${original.still_image_file},
-      ${original.vendor_id}, ${original.stage_id}, ${original.supplier}, ${original.sku},
+      ${original.vendor_id}, ${original.stage_id}, ${original.supplier}, ${original.sku}, ${original.sku_quantity},
       ${original.created_at}::timestamptz + interval '1 millisecond'
     )
   `
@@ -354,6 +357,26 @@ export async function addBulkMaterial(inspectionId: string, formData: FormData) 
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
 }
 
+// Edit an existing bulk material's fields in place. matches_reviewed resets
+// to false so the auto-fill banner re-evaluates against the corrected
+// supplier/sku -- an edit usually means the reviewer is fixing exactly the
+// thing that made it match wrong (or not match at all) the first time.
+export async function updateBulkMaterial(id: string, inspectionId: string, formData: FormData) {
+  const sql = getSql()
+  const supplier = String(formData.get('bulk_supplier') ?? '').trim() || null
+  const sku = String(formData.get('bulk_sku') ?? '').trim() || null
+  const quantity = String(formData.get('bulk_quantity') ?? '').trim() || null
+  const notes = String(formData.get('bulk_notes') ?? '').trim() || null
+
+  await sql`
+    update inspection_bulk_materials
+    set supplier = ${supplier}, sku = ${sku}, quantity = ${quantity}, notes = ${notes}, matches_reviewed = false
+    where id = ${id}
+  `
+
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, id, inspectionId) call site; formAction always passes the triggering form's FormData last
 export async function removeBulkMaterial(id: string, inspectionId: string, _formData: FormData) {
   const sql = getSql()
@@ -373,11 +396,16 @@ export async function removeBulkMaterial(id: string, inspectionId: string, _form
 export async function applyBulkMaterialMatches(bulkMaterialId: string, inspectionId: string, formData: FormData) {
   const sql = getSql()
   const lineItemIds = formData.getAll('apply_item_id').map(String)
-  const [bm] = await sql`select supplier, sku, quantity from inspection_bulk_materials where id = ${bulkMaterialId}`
+  const [bm] = await sql`select supplier, sku from inspection_bulk_materials where id = ${bulkMaterialId}`
   if (bm && lineItemIds.length > 0) {
+    // sku_quantity is deliberately NOT copied here -- the bulk material's
+    // quantity is the size of the whole purchase (a 6-pack of bulbs), not how
+    // many this specific line item needs (its own comment might say "replace
+    // one bulb"). Copying it produced a real, wrong "Qty 6" on a real quote.
+    // Leave it for the reviewer to fill in per item.
     await sql`
       update line_items
-      set supplier = ${bm.supplier}, sku = ${bm.sku}, sku_quantity = ${bm.quantity}
+      set supplier = ${bm.supplier}, sku = ${bm.sku}
       where id in ${sql(lineItemIds)} and supplier is null and sku is null
     `
   }
@@ -789,4 +817,25 @@ export async function retryInspectionVideo(videoRowId: string, inspectionId: str
   `) as unknown as InspectionVideoRow[]
 
   return { videos }
+}
+
+// "Share Images" (Image Folder page): called directly from a client
+// component's onClick, not a <form> -- the client needs the resulting URL
+// back immediately to copy it to the clipboard, which a form action's void
+// return can't do. Takes a plain array, not FormData, same as
+// updateLineItemSchedule above. `images` is a snapshot, not a set of
+// line_item ids, so the resulting link keeps working even if those line
+// items are later edited or removed -- see migration 0025.
+export async function createImageShareLink(
+  inspectionId: string,
+  images: { url: string; roomArea: string; item: string }[]
+): Promise<{ url?: string; error?: string }> {
+  if (images.length === 0) return { error: 'Select at least one image first.' }
+  const sql = getSql()
+  const token = randomUUID()
+  await sql`
+    insert into image_share_links (inspection_id, token, images)
+    values (${inspectionId}, ${token}, ${sql.json(images)})
+  `
+  return { url: `/share/${token}` }
 }

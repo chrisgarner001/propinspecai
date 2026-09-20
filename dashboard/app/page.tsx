@@ -63,7 +63,7 @@ export default async function Home() {
   `) as unknown as InspectionRow[]
 
   return (
-    <AppShell active="/" reviewerName="Jessica Zilka" title="Move-out inspections">
+    <AppShell active="/" title="Move-out inspections">
       <div className="flex justify-end px-6 py-4 border-b border-border">
         <Link
           href="/inspections/new"

@@ -105,7 +105,6 @@ export default async function InspectionPage({
   return (
     <AppShell
       active="/"
-      reviewerName="Jessica Zilka"
       title={inspection.property_address}
       wide
       headerContent={

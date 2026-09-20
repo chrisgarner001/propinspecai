@@ -20,7 +20,7 @@ export default async function StagesSetupPage() {
   const stages = (await sql`select id, name, sort_order from stages order by sort_order`) as unknown as Stage[]
 
   return (
-    <AppShell active="/setup" reviewerName="Jessica Zilka" title="Set Up — Stages">
+    <AppShell active="/setup" title="Set Up — Stages">
       <div className="p-6 max-w-xl">
         <div className="font-medium">Stages</div>
         <div className="text-[12px] text-text-muted mt-1 mb-3">

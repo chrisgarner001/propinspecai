@@ -140,7 +140,6 @@ export default async function DispatchBoardPage({
   return (
     <AppShell
       active="/dispatch-board"
-      reviewerName="Jessica Zilka"
       title={focusedProperty ? `Dispatch Board — ${focusedProperty}` : 'Dispatch Board'}
       wide
     >

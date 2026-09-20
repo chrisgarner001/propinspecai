@@ -1,6 +1,7 @@
 import { getSql } from '@/lib/db'
 import { notFound } from 'next/navigation'
 import AppShell from '@/app/components/AppShell'
+import ImageShareGallery from '@/app/components/ImageShareGallery'
 
 // "View Image Folder" -- every still frame extracted from this inspection's
 // video, in one gallery, since reviewing them one hover-preview at a time
@@ -33,48 +34,18 @@ export default async function InspectionStillsPage({ params }: { params: Promise
   }
 
   return (
-    <AppShell active="/" reviewerName="Jessica Zilka" title={`Image Folder — ${inspection.property_address}`} wide>
-      <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-surface-alt">
-        <div className="text-[13px] text-text-muted">
-          {inspection.property_address} · Job <span className="data-mono">{inspection.job_number}</span> ·{' '}
-          <span className="data-mono">{stills.length}</span> still(s)
-        </div>
-        <a
-          href={`/inspections/${id}`}
-          className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
-        >
-          Back to Inspection
-        </a>
-      </div>
-
-      {stills.length === 0 ? (
-        <div className="px-6 py-6 text-[13px] text-text-muted">
-          No still images extracted yet for this inspection.
-        </div>
-      ) : (
-        [...roomGroups.entries()].map(([room, items]) => (
-          <div key={room} className="px-6 py-4 border-b border-border">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-2">{room}</div>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
-              {items.map((s) => (
-                <a
-                  key={s.id}
-                  href={s.still_image_file}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block border border-border rounded-[var(--radius-md)] overflow-hidden bg-surface hover:border-accent"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element -- source is an arbitrary Supabase Storage URL, not a static/public import */}
-                  <img src={s.still_image_file} alt={`${room} — ${s.item}`} className="w-full h-36 object-cover" />
-                  <div className="data-mono text-[10px] text-text-muted px-2 py-1.5 truncate border-t border-border" title={s.item}>
-                    {s.item}
-                  </div>
-                </a>
-              ))}
-            </div>
-          </div>
-        ))
-      )}
+    <AppShell active="/" title={`Image Folder — ${inspection.property_address}`} wide>
+      <ImageShareGallery
+        inspectionId={id}
+        backHref={`/inspections/${id}`}
+        summary={
+          <>
+            {inspection.property_address} · Job <span className="data-mono">{inspection.job_number}</span> ·{' '}
+            <span className="data-mono">{stills.length}</span> still(s)
+          </>
+        }
+        roomGroups={[...roomGroups.entries()]}
+      />
     </AppShell>
   )
 }

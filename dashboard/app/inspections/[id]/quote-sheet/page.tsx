@@ -8,6 +8,7 @@ import {
   removeLineItemSku,
   addBulkMaterial,
   removeBulkMaterial,
+  updateBulkMaterial,
   applyBulkMaterialMatches,
   dismissBulkMaterialMatches,
 } from '@/app/actions'
@@ -81,8 +82,15 @@ type BulkMaterial = {
   matches_reviewed: boolean
 }
 
-export default async function QuoteSheetPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function QuoteSheetPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ editBulk?: string }>
+}) {
   const { id } = await params
+  const { editBulk } = await searchParams
   const sql = getSql()
 
   const [inspection] = await sql`select * from inspections where id = ${id}`
@@ -159,7 +167,7 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
   const totalHours = lineItems.reduce((sum, li) => sum + (li.labor_hours !== null ? Number(li.labor_hours) : 0), 0)
 
   return (
-    <AppShell active="/" reviewerName="Jessica Zilka" title={`Quote Sheet — ${inspection.property_address}`} wide>
+    <AppShell active="/" title={`Quote Sheet — ${inspection.property_address}`} wide>
       <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-surface-alt">
         <div className="flex items-center gap-3">
           <div className="text-[13px] text-text-muted">
@@ -234,20 +242,77 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
         </div>
 
         {bulkMaterials.length > 0 && (
-          <div className="mb-2 space-y-1">
-            {bulkMaterials.map((bm) => (
-              <div key={bm.id} className="flex items-center gap-2 text-[12px]">
-                <span className="min-w-0 flex-1 truncate">
-                  <span className="font-semibold">{bm.supplier ?? '—'}</span>{' '}
-                  <span className="data-mono text-text-muted">{bm.sku ?? ''}</span>
-                  {bm.quantity && <span className="text-text-muted"> · Qty {bm.quantity}</span>}
-                  {bm.notes && <span className="text-text-muted"> — {bm.notes}</span>}
-                </span>
-                <form action={removeBulkMaterial.bind(null, bm.id, id)}>
-                  <button type="submit" title="Remove" className="text-[20px] leading-none font-bold text-error hover:text-error/70">
-                    ×
-                  </button>
-                </form>
+          <div className="mb-3 space-y-2">
+            {bulkMaterials.map((bm, index) => (
+              <div key={bm.id} className="border border-border rounded-[var(--radius-sm)] p-2">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+                    Material Item {index + 1}
+                  </span>
+                  {editBulk !== bm.id && (
+                    <div className="flex items-center gap-3">
+                      <a
+                        href={`/inspections/${id}/quote-sheet?editBulk=${bm.id}`}
+                        className="text-[11px] font-semibold text-text-muted hover:text-accent"
+                      >
+                        Edit
+                      </a>
+                      <form action={removeBulkMaterial.bind(null, bm.id, id)}>
+                        <button type="submit" className="text-[11px] font-semibold text-error hover:text-error/70">
+                          Delete
+                        </button>
+                      </form>
+                    </div>
+                  )}
+                </div>
+
+                {editBulk === bm.id ? (
+                  <form action={updateBulkMaterial.bind(null, bm.id, id)} className="flex items-end gap-2 flex-wrap">
+                    <div className="flex-1 min-w-[140px]">
+                      <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">
+                        Supplier
+                      </label>
+                      <input name="bulk_supplier" defaultValue={bm.supplier ?? ''} className={miniField} />
+                    </div>
+                    <div className="flex-1 min-w-[140px]">
+                      <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">
+                        SKU
+                      </label>
+                      <input name="bulk_sku" defaultValue={bm.sku ?? ''} className={`${miniField} data-mono`} />
+                    </div>
+                    <div className="w-24">
+                      <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">
+                        Qty
+                      </label>
+                      <input name="bulk_quantity" defaultValue={bm.quantity ?? ''} className={miniField} />
+                    </div>
+                    <div className="flex-[2] min-w-[180px]">
+                      <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">
+                        Notes
+                      </label>
+                      <input name="bulk_notes" defaultValue={bm.notes ?? ''} className={miniField} />
+                    </div>
+                    <button
+                      type="submit"
+                      className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap"
+                    >
+                      Save
+                    </button>
+                    <a
+                      href={`/inspections/${id}/quote-sheet`}
+                      className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap"
+                    >
+                      Cancel
+                    </a>
+                  </form>
+                ) : (
+                  <div className="text-[12px]">
+                    <span className="font-semibold">{bm.supplier ?? '—'}</span>{' '}
+                    <span className="data-mono text-text-muted">{bm.sku ?? ''}</span>
+                    {bm.quantity && <span className="text-text-muted"> · Qty {bm.quantity}</span>}
+                    {bm.notes && <span className="text-text-muted"> — {bm.notes}</span>}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -347,19 +412,9 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
               key={li.id}
               id={firstRowIdByStage.get(stageKey) === li.id ? stageAnchor(stageKey) : undefined}
               role="row"
-              className={`relative grid ${ROW_COLS} gap-2 items-start px-3 pt-2.5 pb-7 border-b border-border scroll-mt-4`}
+              className={`grid ${ROW_COLS} gap-2 items-start px-3 pt-2.5 pb-2.5 border-b border-border scroll-mt-4`}
             >
               <input type="hidden" name="ids" value={li.id} />
-              <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1.5">
-                <RemoveSectionControl id={li.id} />
-                <button
-                  type="submit"
-                  formAction={duplicateLineItem.bind(null, li.id, id)}
-                  className="text-[10px] font-semibold text-text-muted hover:text-accent border border-border hover:border-accent rounded-[var(--radius-sm)] px-1.5 py-0.5 bg-surface"
-                >
-                  Duplicate
-                </button>
-              </div>
               <div role="cell" className="min-w-0">
                 <input name={`room_area__${li.id}`} defaultValue={li.room_area} className={miniField} />
               </div>
@@ -401,6 +456,16 @@ export default async function QuoteSheetPage({ params }: { params: Promise<{ id:
                     </option>
                   ))}
                 </select>
+              </div>
+              <div role="cell" className="col-span-full flex items-center gap-1.5 mt-1">
+                <RemoveSectionControl id={li.id} />
+                <button
+                  type="submit"
+                  formAction={duplicateLineItem.bind(null, li.id, id)}
+                  className="text-[10px] font-semibold text-text-muted hover:text-accent border border-border hover:border-accent rounded-[var(--radius-sm)] px-1.5 py-0.5 bg-surface"
+                >
+                  Duplicate
+                </button>
               </div>
               <div role="cell" className="col-span-full flex flex-wrap items-end gap-2 mt-1 pt-2 pb-1 border-t border-border">
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted pb-1.5">
