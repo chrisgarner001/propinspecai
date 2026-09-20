@@ -53,12 +53,19 @@ export default function StatusSelect({
     })
   }
 
+  // A border (in the same color family as the pill's text/background,
+  // matching the dot-color derivation StatusBadge already uses) so this
+  // reads as an editable control rather than a plain status label -- it's
+  // the one place in the app a select is styled as a pill instead of a
+  // bordered box, so without its own visual cue it doesn't look clickable.
+  const borderClass = style.text.replace('text-', 'border-')
+
   return (
     <select
       value={status}
       onChange={handleChange}
       disabled={isPending}
-      className={`appearance-none rounded-full pl-4 pr-2.5 py-0.5 text-[12px] font-semibold border-none cursor-pointer disabled:opacity-70 ${style.bg} ${style.text}`}
+      className={`appearance-none rounded-full pl-4 pr-2.5 py-0.5 text-[12px] font-semibold border cursor-pointer hover:opacity-90 disabled:opacity-70 ${style.bg} ${style.text} ${borderClass}`}
     >
       {displayOptions.map((value) => (
         <option key={value} value={value}>

@@ -167,16 +167,25 @@ export default async function InspectionPage({
         inspection.move_in_report_drive_url ||
         inspection.special_instructions) && (
         <div className="px-6 py-3 border-b border-border bg-surface-alt space-y-2">
-          <div className="flex flex-wrap gap-x-6 gap-y-1">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
             {inspection.source_video_drive_folder_url && (
-              <a
-                href={inspection.source_video_drive_folder_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[12px] font-semibold text-accent underline decoration-accent/40 hover:text-accent-hover"
-              >
-                Source videos (Drive) ↗
-              </a>
+              <>
+                <a
+                  href={inspection.source_video_drive_folder_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[12px] font-semibold text-accent underline decoration-accent/40 hover:text-accent-hover"
+                >
+                  Source videos (Drive) ↗
+                </a>
+                <a
+                  href={`/inspections/${id}/stills`}
+                  className="text-[12px] font-semibold text-accent underline decoration-accent/40 hover:text-accent-hover"
+                >
+                  View Image Folder
+                </a>
+                <VideoProcessingPanel inspectionId={id} initialVideos={inspectionVideos} />
+              </>
             )}
             {inspection.move_in_report_drive_url && (
               <a
@@ -196,10 +205,6 @@ export default async function InspectionPage({
             </div>
           )}
         </div>
-      )}
-
-      {inspection.source_video_drive_folder_url && (
-        <VideoProcessingPanel inspectionId={id} initialVideos={inspectionVideos} />
       )}
 
       {areas.length > 0 && (

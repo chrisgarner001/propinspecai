@@ -67,48 +67,53 @@ export default function VideoProcessingPanel({
 
   const notStarted = total === 0
 
+  // Returns a Fragment, not its own bordered block: the trigger (toggle +
+  // action button) is meant to sit inline alongside the other links on the
+  // inspection detail page's links row, sharing that row's chrome instead of
+  // getting its own. `basis-full` on the expanded panel forces it onto its
+  // own line within that same flex-wrap row without needing a separate
+  // container -- a plain child would otherwise just wrap in awkwardly beside
+  // the links instead of taking the full row.
   return (
-    <div className="px-6 py-4 border-b border-border bg-surface-alt space-y-3">
-      <div className="flex items-center justify-between">
+    <>
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className="flex items-center gap-1.5 text-[13px] font-semibold"
+      >
+        <span className="text-text-muted text-[11px]">{collapsed ? '▶' : '▼'}</span>
+        Video Processing
+        {collapsed && total > 0 && (
+          <span className="font-normal text-text-muted text-[12px]">
+            ({doneCount} of {total} processed{failedCount > 0 ? ` · ${failedCount} failed` : ''})
+          </span>
+        )}
+      </button>
+      {notStarted && (
         <button
           type="button"
-          onClick={() => setCollapsed((c) => !c)}
-          className="flex items-center gap-1.5 text-[13px] font-semibold"
+          onClick={handleStart}
+          disabled={running}
+          className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
         >
-          <span className="text-text-muted text-[11px]">{collapsed ? '▶' : '▼'}</span>
-          Video Processing
-          {collapsed && total > 0 && (
-            <span className="font-normal text-text-muted text-[12px]">
-              ({doneCount} of {total} processed{failedCount > 0 ? ` · ${failedCount} failed` : ''})
-            </span>
-          )}
+          {running ? 'Starting…' : 'Start Processing'}
         </button>
-        {notStarted && (
-          <button
-            type="button"
-            onClick={handleStart}
-            disabled={running}
-            className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
-          >
-            {running ? 'Starting…' : 'Start Processing'}
-          </button>
-        )}
-        {!notStarted && (
-          <button
-            type="button"
-            onClick={handleStart}
-            disabled={running}
-            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
-          >
-            {running ? 'Checking…' : 'Check for new videos'}
-          </button>
-        )}
-      </div>
+      )}
+      {!notStarted && (
+        <button
+          type="button"
+          onClick={handleStart}
+          disabled={running}
+          className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
+        >
+          {running ? 'Checking…' : 'Check for new videos'}
+        </button>
+      )}
 
-      {bannerError && <div className="text-[12px] text-error">{bannerError}</div>}
+      {bannerError && <div className="basis-full text-[12px] text-error">{bannerError}</div>}
 
       {!collapsed && total > 0 && (
-        <>
+        <div className="basis-full space-y-3 pt-2">
           <div className="space-y-1">
             <div className="flex items-center justify-between text-[11px] text-text-muted">
               <span>
@@ -159,8 +164,8 @@ export default function VideoProcessingPanel({
                 {v.filename}: {v.error_message}
               </div>
             ))}
-        </>
+        </div>
       )}
-    </div>
+    </>
   )
 }
