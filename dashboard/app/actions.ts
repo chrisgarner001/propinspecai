@@ -311,9 +311,14 @@ export async function addLineItemSku(lineItemId: string, inspectionId: string, f
   const supplier = String(formData.get(`new_sku_supplier__${lineItemId}`) ?? '').trim() || null
   const sku = String(formData.get(`new_sku__${lineItemId}`) ?? '').trim() || null
   const quantity = String(formData.get(`new_sku_quantity__${lineItemId}`) ?? '').trim() || null
+  const materialsCost = toNumberOrNull(formData.get(`new_sku_materials_cost__${lineItemId}`))
+  const laborHours = toNumberOrNull(formData.get(`new_sku_labor_hours__${lineItemId}`))
   if (!supplier && !sku) return
 
-  await sql`insert into line_item_additional_skus (line_item_id, supplier, sku, quantity) values (${lineItemId}, ${supplier}, ${sku}, ${quantity})`
+  await sql`
+    insert into line_item_additional_skus (line_item_id, supplier, sku, quantity, materials_cost, labor_hours)
+    values (${lineItemId}, ${supplier}, ${sku}, ${quantity}, ${materialsCost}, ${laborHours})
+  `
 
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
 }
@@ -438,8 +443,10 @@ export async function dismissBulkMaterialMatches(bulkMaterialId: string, inspect
 // per-item material cost isn't a separate real number -- the bulk item's own
 // `cost` (migration 0026) is where that $ amount lives instead. labor_hours
 // is untouched -- linking a materials source says nothing about the labor.
-export async function linkLineItemToBulkMaterial(lineItemId: string, inspectionId: string, formData: FormData) {
-  const bulkMaterialId = String(formData.get(`bulk_material_id__${lineItemId}`) ?? '')
+// Called directly from a client component's onChange (LinkBulkMaterialSelect)
+// now that picking a value submits immediately -- a plain arg, not FormData,
+// since there's no form involved anymore.
+export async function linkLineItemToBulkMaterial(lineItemId: string, inspectionId: string, bulkMaterialId: string) {
   if (!bulkMaterialId) return
   const sql = getSql()
   const [bm] = await sql`select supplier, sku from inspection_bulk_materials where id = ${bulkMaterialId}`

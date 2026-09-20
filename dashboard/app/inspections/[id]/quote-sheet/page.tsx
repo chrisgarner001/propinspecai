@@ -10,11 +10,11 @@ import {
   updateBulkMaterial,
   applyBulkMaterialMatches,
   dismissBulkMaterialMatches,
-  linkLineItemToBulkMaterial,
 } from '@/app/actions'
 import { matchBulkMaterialCandidates } from '@/lib/bulkMatch'
 import AppShell from '@/app/components/AppShell'
 import AddLineItemSku from '@/app/components/AddLineItemSku'
+import LinkBulkMaterialSelect from '@/app/components/LinkBulkMaterialSelect'
 import LineItemVendorAssignment from '@/app/components/LineItemVendorAssignment'
 import LineItemMaterialsCost from '@/app/components/LineItemMaterialsCost'
 import RemoveSectionControl from '@/app/components/RemoveSectionControl'
@@ -74,7 +74,15 @@ type LineItem = {
 
 type Vendor = { id: string; name: string }
 type Stage = { id: string; name: string; sort_order: number }
-type AdditionalSku = { id: string; line_item_id: string; supplier: string | null; sku: string | null; quantity: string | null }
+type AdditionalSku = {
+  id: string
+  line_item_id: string
+  supplier: string | null
+  sku: string | null
+  quantity: string | null
+  materials_cost: string | null
+  labor_hours: string | null
+}
 type BulkMaterial = {
   id: string
   supplier: string | null
@@ -112,7 +120,7 @@ export default async function QuoteSheetPage({
   const stageById = new Map(stages.map((s) => [s.id, s]))
 
   const additionalSkus = (await sql`
-    select id, line_item_id, supplier, sku, quantity from line_item_additional_skus
+    select id, line_item_id, supplier, sku, quantity, materials_cost, labor_hours from line_item_additional_skus
     where line_item_id in ${sql(lineItems.length > 0 ? lineItems.map((li) => li.id) : [''])}
     order by created_at
   `) as unknown as AdditionalSku[]
@@ -476,7 +484,10 @@ export default async function QuoteSheetPage({
                   Total: $
                   {(li.assigned_to === 'Outside Vendor'
                     ? Number(li.vendor_estimated_cost ?? 0)
-                    : Number(li.materials_cost ?? 0) + Number(li.labor_hours ?? 0) * laborRate
+                    : (additionalSkusByItem.get(li.id) ?? []).reduce(
+                        (sum, row) => sum + Number(row.materials_cost ?? 0) + Number(row.labor_hours ?? 0) * laborRate,
+                        Number(li.materials_cost ?? 0) + Number(li.labor_hours ?? 0) * laborRate
+                      )
                   ).toFixed(2)}
                 </span>
                 <RemoveSectionControl id={li.id} />
@@ -488,92 +499,105 @@ export default async function QuoteSheetPage({
                   Duplicate
                 </button>
               </div>
-              <div role="cell" className="col-span-full mt-1 pt-2 border-t border-border">
-                <div className="text-center text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1.5">
+              <div role="cell" className="col-span-full mt-1 -mx-3 px-3 pt-2 pb-3 border-t border-border bg-surface-alt space-y-2">
+                <div className="text-center text-[10px] font-semibold uppercase tracking-wide text-text-muted">
                   Materials for Above Section
                 </div>
-                <div className="flex flex-wrap items-end gap-2">
-                <div className="w-36">
-                  <input
-                    name={`supplier__${li.id}`}
-                    defaultValue={li.supplier ?? ''}
-                    placeholder="Supplier"
-                    className={miniField}
-                  />
-                </div>
-                <div className="w-28">
-                  <input
-                    name={`sku__${li.id}`}
-                    defaultValue={li.sku ?? ''}
-                    placeholder="SKU"
-                    className={`${miniField} data-mono`}
-                  />
-                </div>
-                <div className="w-16">
-                  <input
-                    name={`sku_quantity__${li.id}`}
-                    defaultValue={li.sku_quantity ?? ''}
-                    placeholder="Qty"
-                    title="Quantity"
-                    className={miniField}
+
+                <div className="flex flex-wrap items-end justify-between gap-2">
+                  <div className="flex items-end gap-2">
+                    <div className="w-36">
+                      <input
+                        name={`supplier__${li.id}`}
+                        defaultValue={li.supplier ?? ''}
+                        placeholder="Supplier"
+                        className={miniField}
+                      />
+                    </div>
+                    <div className="w-28">
+                      <input
+                        name={`sku__${li.id}`}
+                        defaultValue={li.sku ?? ''}
+                        placeholder="SKU"
+                        className={`${miniField} data-mono`}
+                      />
+                    </div>
+                    <div className="w-16">
+                      <input
+                        name={`sku_quantity__${li.id}`}
+                        defaultValue={li.sku_quantity ?? ''}
+                        placeholder="Qty"
+                        title="Quantity"
+                        className={miniField}
+                      />
+                    </div>
+                  </div>
+                  <LineItemMaterialsCost
+                    id={li.id}
+                    assignedTo={li.assigned_to}
+                    materialsCost={li.materials_cost}
+                    laborHours={li.labor_hours}
                   />
                 </div>
 
                 {bulkMaterials.length > 0 && (
-                  <>
+                  <div className="flex items-center gap-2">
                     <span className="text-[11px] text-text-muted">or</span>
-                    <select
-                      name={`bulk_material_id__${li.id}`}
-                      defaultValue=""
-                      className={`${miniField} w-40`}
-                    >
-                      <option value="" disabled>
-                        Choose bulk item…
-                      </option>
-                      {bulkMaterials.map((bm) => (
-                        <option key={bm.id} value={bm.id}>
-                          {bm.supplier ?? '—'} {bm.sku ?? ''}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="submit"
-                      formAction={linkLineItemToBulkMaterial.bind(null, li.id, id)}
-                      className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap"
-                    >
-                      Use Bulk Item
-                    </button>
-                  </>
+                    <LinkBulkMaterialSelect lineItemId={li.id} inspectionId={id} bulkMaterials={bulkMaterials} />
+                  </div>
                 )}
 
-                <LineItemMaterialsCost
-                  id={li.id}
-                  assignedTo={li.assigned_to}
-                  materialsCost={li.materials_cost}
-                  laborHours={li.labor_hours}
-                />
-
                 {(additionalSkusByItem.get(li.id) ?? []).map((row) => (
-                  <div
-                    key={row.id}
-                    className="flex items-center gap-1.5 bg-surface-alt border border-border rounded-[var(--radius-sm)] pl-2 pr-1.5 py-1"
-                  >
-                    <span className="text-[11px] text-text-muted truncate max-w-[180px]" title={`${row.supplier ?? '—'} ${row.sku ?? ''}`}>
-                      {row.supplier ?? '—'} <span className="data-mono">{row.sku ?? ''}</span>
-                      {row.quantity && <span> · Qty {row.quantity}</span>}
-                    </span>
-                    <button
-                      type="submit"
-                      formAction={removeLineItemSku.bind(null, row.id, id)}
-                      title="Remove this SKU"
-                      className="text-[11px] text-text-muted hover:text-error leading-none"
-                    >
-                      ×
-                    </button>
+                  <div key={row.id} className="flex flex-wrap items-end justify-between gap-2 pt-2 border-t border-border">
+                    <div className="flex items-end gap-2">
+                      <div className="w-36">
+                        <input disabled defaultValue={row.supplier ?? ''} placeholder="Supplier" className={miniField} />
+                      </div>
+                      <div className="w-28">
+                        <input disabled defaultValue={row.sku ?? ''} placeholder="SKU" className={`${miniField} data-mono`} />
+                      </div>
+                      <div className="w-16">
+                        <input disabled defaultValue={row.quantity ?? ''} placeholder="Qty" title="Quantity" className={miniField} />
+                      </div>
+                    </div>
+                    <div className="flex items-end gap-2">
+                      <div className="w-24">
+                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">
+                          Materials $
+                        </label>
+                        <input
+                          disabled
+                          defaultValue={row.materials_cost ?? ''}
+                          placeholder="—"
+                          className={`${miniField} data-mono`}
+                        />
+                      </div>
+                      <div className="w-28">
+                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1">
+                          Labor (hrs)
+                        </label>
+                        <input
+                          disabled
+                          defaultValue={row.labor_hours ?? ''}
+                          placeholder="—"
+                          className={`${miniField} data-mono`}
+                        />
+                      </div>
+                      <form action={removeLineItemSku.bind(null, row.id, id)}>
+                        <button
+                          type="submit"
+                          title="Remove this item"
+                          className="text-[16px] leading-none font-bold text-error hover:text-error/70 pb-1.5"
+                        >
+                          ×
+                        </button>
+                      </form>
+                    </div>
                   </div>
                 ))}
 
-                <AddLineItemSku lineItemId={li.id} inspectionId={id} bulkMaterials={bulkMaterials} />
+                <div className="pt-1">
+                  <AddLineItemSku lineItemId={li.id} inspectionId={id} assignedTo={li.assigned_to} bulkMaterials={bulkMaterials} />
                 </div>
               </div>
             </div>

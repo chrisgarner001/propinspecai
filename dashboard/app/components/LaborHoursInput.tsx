@@ -6,12 +6,23 @@ export default function LaborHoursInput({
   name,
   defaultValue,
   disabled,
+  onValueChange,
 }: {
-  name: string
+  // Optional: AddLineItemSku.tsx doesn't submit this input by name at all
+  // (it reads the value via onValueChange and sets it into a FormData entry
+  // itself), unlike every other caller, which relies on `name` for a plain
+  // form submission.
+  name?: string
   defaultValue: string | null
   disabled: boolean
+  onValueChange?: (value: string) => void
 }) {
   const [hours, setHours] = useState(defaultValue ?? '')
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setHours(e.target.value)
+    onValueChange?.(e.target.value)
+  }
 
   return (
     <input
@@ -19,7 +30,7 @@ export default function LaborHoursInput({
       type="number"
       step="0.25"
       value={hours}
-      onChange={(e) => setHours(e.target.value)}
+      onChange={handleChange}
       disabled={disabled}
       placeholder="—"
       className="data-mono border border-border rounded-[var(--radius-sm)] px-2 py-1 w-full min-w-0 bg-surface disabled:bg-surface-alt disabled:text-text-muted"
