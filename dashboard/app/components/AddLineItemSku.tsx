@@ -23,25 +23,36 @@ export default function AddLineItemSku({ lineItemId, inspectionId }: { lineItemI
   const [sku, setSku] = useState('')
   const [quantity, setQuantity] = useState('')
   const [isPending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
   const router = useRouter()
 
   function handleAdd() {
     if (!supplier.trim() && !sku.trim()) return
+    setError(null)
     const formData = new FormData()
     formData.set(`new_sku_supplier__${lineItemId}`, supplier)
     formData.set(`new_sku__${lineItemId}`, sku)
     formData.set(`new_sku_quantity__${lineItemId}`, quantity)
     startTransition(async () => {
-      await addLineItemSku(lineItemId, inspectionId, formData)
-      setSupplier('')
-      setSku('')
-      setQuantity('')
-      router.refresh()
+      try {
+        await addLineItemSku(lineItemId, inspectionId, formData)
+        setSupplier('')
+        setSku('')
+        setQuantity('')
+        router.refresh()
+      } catch (err) {
+        // Surfaced instead of swallowed: a stale page open across a
+        // redeploy (Next.js Server Actions are keyed per build) fails
+        // exactly like this -- silently, with the click otherwise looking
+        // like it did nothing. A visible error at least tells the reviewer
+        // to reload the page, instead of "the button does nothing."
+        setError((err as Error).message || 'Something went wrong. Try reloading the page.')
+      }
     })
   }
 
   return (
-    <div className="flex items-end gap-1.5 pl-2 ml-1 border-l border-border">
+    <div className="flex items-end gap-1.5 pl-2 ml-1 border-l border-border flex-wrap">
       <input
         value={supplier}
         onChange={(e) => setSupplier(e.target.value)}
@@ -69,6 +80,7 @@ export default function AddLineItemSku({ lineItemId, inspectionId }: { lineItemI
       >
         {isPending ? 'Adding…' : 'Add Item'}
       </button>
+      {error && <div className="basis-full text-[11px] text-error">{error} — try reloading the page.</div>}
     </div>
   )
 }

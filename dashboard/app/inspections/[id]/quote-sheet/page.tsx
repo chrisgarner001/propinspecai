@@ -490,7 +490,7 @@ export default async function QuoteSheetPage({
               </div>
               <div role="cell" className="col-span-full mt-1 pt-2 border-t border-border">
                 <div className="text-center text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-1.5">
-                  Materials for this Item
+                  Materials for This Section
                 </div>
                 <div className="flex flex-wrap items-end gap-2">
                 <div className="w-36">
