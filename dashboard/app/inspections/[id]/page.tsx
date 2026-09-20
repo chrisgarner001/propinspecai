@@ -1,5 +1,5 @@
 import { getSql } from '@/lib/db'
-import { bulkUpdateLineItems, addLineItem, duplicateLineItem, deleteInspection } from '@/app/actions'
+import { bulkUpdateLineItems, addLineItem, duplicateLineItem, deleteInspection, createBatches } from '@/app/actions'
 import { notFound } from 'next/navigation'
 import AppShell from '@/app/components/AppShell'
 import StatusSelect from '@/app/components/StatusSelect'
@@ -20,6 +20,12 @@ import type { InspectionVideoRow } from '@/app/actions'
 export const maxDuration = 300
 
 const CONDITIONS = ['Good', 'Fair', 'Damaged', 'Not Rated']
+
+// Once a quote is approved, the rehab/turn side of the job (Dispatch Board,
+// batching, Stage View, purchasing) becomes relevant -- same gate the Quote
+// Sheet page itself already uses for its own copy of these buttons, so a
+// reviewer doesn't have to leave this page to reach them once they're live.
+const QUOTE_ACTIONS_VISIBLE_STATUSES = ['approved', 'scheduled', 'in_process', 'completed']
 
 function areaAnchor(roomArea: string) {
   return `area-${roomArea.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}`
@@ -91,37 +97,70 @@ export default async function InspectionPage({
   const [settings] = await sql`select gpm_labor_charge from settings where id = true`
   const laborRate = Number(settings?.gpm_labor_charge ?? 0)
 
-  return (
-    <AppShell active="/" reviewerName="Jessica Zilka" title={inspection.property_address} wide>
-      <div className="flex items-center justify-between gap-2 px-6 py-3 border-b border-border bg-surface-alt">
-        <DeleteInspectionButton action={deleteInspection.bind(null, id)} label="Delete inspection" />
-        <div className="flex items-center gap-2">
-          <a
-            href={`/inspections/${id}/quote-sheet`}
-            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
-          >
-            Create Quote Sheet
-          </a>
-          <a
-            href={`/inspections/${id}/chargeback-review`}
-            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
-          >
-            Tenant Chargeback Review
-          </a>
-        </div>
-      </div>
+  const quoteActionsVisible = QUOTE_ACTIONS_VISIBLE_STATUSES.includes(inspection.status)
 
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-        <div className="text-[13px] text-text-muted">
-          Job <span className="data-mono">{inspection.job_number}</span> · {inspection.inspector_name} ·{' '}
-          <span className="data-mono">
+  const linkClass =
+    'bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap'
+
+  return (
+    <AppShell
+      active="/"
+      reviewerName="Jessica Zilka"
+      title={inspection.property_address}
+      wide
+      headerContent={
+        <div className="flex items-center gap-4 flex-wrap min-w-0">
+          <h1 className="font-display font-bold text-[17px] truncate">
+            Property: {inspection.property_address}
+          </h1>
+          <div className="text-[13px] text-text-muted whitespace-nowrap">
+            Job <span className="data-mono">{inspection.job_number}</span>
+          </div>
+          <div className="text-[13px] text-text-muted whitespace-nowrap">Inspector: {inspection.inspector_name}</div>
+          <div className="text-[13px] text-text-muted data-mono whitespace-nowrap">
             {new Date(inspection.inspection_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}
-          </span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+      }
+    >
+      <div className="flex items-center justify-between gap-2 px-6 py-3 border-b border-border bg-surface-alt flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">Status</span>
           <StatusSelect inspectionId={id} status={inspection.status} />
+          <a href={`/inspections/${id}/chargeback-review`} className={linkClass}>
+            Tenant Chargeback Review
+          </a>
+          <a href={`/inspections/${id}/quote-sheet`} className={linkClass}>
+            Quote and Schedule
+          </a>
+          {quoteActionsVisible && (
+            <>
+              <a href={`/dispatch-board?job=${id}`} className={linkClass}>
+                Dispatch Board
+              </a>
+              <form action={createBatches.bind(null, id)}>
+                <button type="submit" className={linkClass}>
+                  Create Batches
+                </button>
+              </form>
+              <a href={`/inspections/${id}/quote-sheet/stages`} className={linkClass}>
+                Stage View
+              </a>
+              <a href={`/inspections/${id}/quote-sheet/materials-order/pdf`} target="_blank" rel="noopener noreferrer" className={linkClass}>
+                Materials Order List
+              </a>
+              <a
+                href={`/inspections/${id}/quote-sheet/pdf`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-3.5 py-2 text-[13px] font-semibold whitespace-nowrap"
+              >
+                Create Quote
+              </a>
+            </>
+          )}
         </div>
+        <DeleteInspectionButton action={deleteInspection.bind(null, id)} label="Delete inspection" />
       </div>
 
       {(inspection.source_video_drive_folder_url ||

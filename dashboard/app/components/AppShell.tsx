@@ -34,12 +34,20 @@ export default function AppShell({
   reviewerName,
   title,
   wide = false,
+  headerContent,
   children,
 }: {
   active: string
   reviewerName: string
   title: string
   wide?: boolean
+  // Escape hatch for a page that needs richer header content than a plain
+  // title + "Reviewing as" (e.g. the inspection detail page's Property/Job/
+  // Inspector line) -- replaces the default header row entirely when given,
+  // rather than adding a third prop-driven layout variant to reason about.
+  // `title` still needs to be passed either way: RecentNav and the browser
+  // tab both key off it regardless of what's visually in the header.
+  headerContent?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
@@ -70,8 +78,12 @@ export default function AppShell({
       </nav>
       <div className="min-w-0">
         <header className="flex items-center justify-between gap-4 px-6 py-4 border-b border-border">
-          <h1 className="font-display font-bold text-[17px] truncate">{title}</h1>
-          <div className="text-[13px] text-text-muted whitespace-nowrap">Reviewing as {reviewerName}</div>
+          {headerContent ?? (
+            <>
+              <h1 className="font-display font-bold text-[17px] truncate">{title}</h1>
+              <div className="text-[13px] text-text-muted whitespace-nowrap">Reviewing as {reviewerName}</div>
+            </>
+          )}
         </header>
         <main>{children}</main>
       </div>
