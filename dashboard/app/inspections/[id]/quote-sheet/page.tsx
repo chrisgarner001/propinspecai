@@ -198,6 +198,12 @@ export default async function QuoteSheetPage({
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <a
+            href={`/inspections/${id}`}
+            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
+          >
+            Back to Inspection
+          </a>
           {TIMELINE_VISIBLE_STATUSES.includes(inspection.status) && (
             <a
               href={`/dispatch-board?job=${id}`}

@@ -12,6 +12,7 @@ import { writeFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import bcrypt from 'bcryptjs'
 
 function toNumberOrNull(value: FormDataEntryValue | null): number | null {
   if (value === null || value === '') return null
@@ -629,6 +630,20 @@ export async function createVendor(formData: FormData) {
   revalidatePath('/setup')
 }
 
+// Setup page only offers Delete on a vendor with zero references (see the
+// in-use count computed there) -- so a live FK violation here means the
+// vendor got newly assigned between page load and submit. Swallow it rather
+// than 500ing; the page's own count will catch up on revalidate.
+export async function deleteVendor(vendorId: string) {
+  const sql = getSql()
+  try {
+    await sql`delete from vendors where id = ${vendorId}`
+  } catch (err) {
+    console.error('deleteVendor failed (likely still in use):', err)
+  }
+  revalidatePath('/setup')
+}
+
 export async function createStage(formData: FormData) {
   const sql = getSql()
   const name = String(formData.get('name') ?? '').trim()
@@ -899,4 +914,51 @@ export async function askHelp(
   } catch (err) {
     return { error: (err as Error).message || 'Something went wrong asking the assistant.' }
   }
+}
+
+// Manage Users (Setup) -- no session/login enforcement exists yet (see
+// app/login/page.tsx), this is just the user-record backend for it. Called
+// directly from CreateUserForm.tsx (useTransition), not a plain form action,
+// so a duplicate-email/short-password rejection can be shown inline instead
+// of silently no-oping the way createVendor/createStage do.
+export async function createUser(
+  email: string,
+  password: string,
+  role: string
+): Promise<{ error?: string }> {
+  const sql = getSql()
+  const normalizedEmail = email.trim().toLowerCase()
+  if (!normalizedEmail || !normalizedEmail.includes('@')) {
+    return { error: 'Enter a valid email address.' }
+  }
+  if (password.length < 8) {
+    return { error: 'Password must be at least 8 characters.' }
+  }
+  if (role !== 'Admin' && role !== 'General User') {
+    return { error: 'Invalid access level.' }
+  }
+
+  const passwordHash = await bcrypt.hash(password, 12)
+
+  try {
+    await sql`
+      insert into users (email, password_hash, role)
+      values (${normalizedEmail}, ${passwordHash}, ${role})
+    `
+  } catch (err) {
+    const pgError = err as { code?: string }
+    if (pgError.code === '23505') {
+      return { error: 'A user with that email already exists.' }
+    }
+    return { error: 'Something went wrong creating the user.' }
+  }
+
+  revalidatePath('/setup/users')
+  return {}
+}
+
+export async function deleteUser(userId: string) {
+  const sql = getSql()
+  await sql`delete from users where id = ${userId}`
+  revalidatePath('/setup/users')
 }
