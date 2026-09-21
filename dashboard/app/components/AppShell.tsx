@@ -2,6 +2,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import RecentNav from './RecentNav'
 import HelpWidget from './HelpWidget'
+import MobileNav from './MobileNav'
 
 const NAV_ITEMS = [
   { href: '/', label: 'Inspections' },
@@ -51,9 +52,15 @@ export default function AppShell({
 }) {
   return (
     <div
-      className={`grid grid-cols-[200px_minmax(0,1fr)] border border-border rounded-lg overflow-hidden bg-surface mx-auto my-10 w-full ${wide ? 'max-w-[1440px]' : 'max-w-6xl'}`}
+      // Below md: a plain full-bleed column, no card chrome (border/margin/
+      // max-width are desktop-only) -- screen width is too scarce on a phone
+      // to spend any of it on a floating-card frame. The 200px sidebar column
+      // doesn't exist below md either; MobileNav (its own md:hidden block)
+      // replaces it with a top bar + drawer instead of shrinking it.
+      className={`flex flex-col md:grid md:grid-cols-[200px_minmax(0,1fr)] md:border md:border-border md:rounded-lg overflow-hidden bg-surface mx-auto md:my-10 w-full ${wide ? 'md:max-w-[1440px]' : 'md:max-w-6xl'}`}
     >
-      <nav className="bg-surface-alt border-r border-border p-4">
+      <MobileNav active={active} navItems={NAV_ITEMS} />
+      <nav className="hidden md:block bg-surface-alt border-r border-border p-4">
         <div className="mb-6">
           <BrandLockup compact />
         </div>
@@ -76,7 +83,7 @@ export default function AppShell({
         <RecentNav label={title} />
       </nav>
       <div className="min-w-0">
-        <header className="flex items-center justify-between gap-4 px-6 py-4 border-b border-border">
+        <header className="flex items-center justify-between flex-wrap gap-4 px-4 py-3 md:px-6 md:py-4 border-b border-border">
           {headerContent ?? <h1 className="font-display font-bold text-[17px] truncate">{title}</h1>}
         </header>
         <main>{children}</main>

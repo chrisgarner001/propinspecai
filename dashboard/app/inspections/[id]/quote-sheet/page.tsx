@@ -50,9 +50,12 @@ function stageAnchor(key: string) {
 
 // See ROW_COLS comment on the main inspection page: minmax(0, Nfr), not bare
 // Nfr, so a long unbroken cell can't force its track wider than its share
-// and desync this row's columns from the header row's.
+// and desync this row's columns from the header row's. Single column below
+// md -- six fixed tracks has no readable width to squeeze into on a phone,
+// so every field just stacks full-width instead (/design-review follow-up,
+// 2026-09-21: "the entire program needs to be optimized for phone").
 const ROW_COLS =
-  'grid-cols-[minmax(0,0.8fr)_minmax(0,1.3fr)_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)]'
+  'grid-cols-1 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.3fr)_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)]'
 
 type LineItem = {
   id: string
@@ -182,8 +185,8 @@ export default async function QuoteSheetPage({
 
   return (
     <AppShell active="/" title={`Quote Sheet — ${inspection.property_address}`} wide>
-      <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-surface-alt">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between flex-wrap gap-2 px-4 py-3 md:px-4 md:px-6 border-b border-border bg-surface-alt">
+        <div className="flex items-center gap-3 flex-wrap">
           <div className="text-[13px] text-text-muted">
             {inspection.property_address} · Job <span className="data-mono">{inspection.job_number}</span> ·{' '}
             <span className="data-mono">${totalMaterials.toFixed(2)}</span> materials total ·{' '}
@@ -194,7 +197,7 @@ export default async function QuoteSheetPage({
             <StatusSelect inspectionId={id} status={inspection.status} options={QUOTE_SHEET_STATUS_OPTIONS} />
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {TIMELINE_VISIBLE_STATUSES.includes(inspection.status) && (
             <a
               href={`/dispatch-board?job=${id}`}
@@ -237,7 +240,7 @@ export default async function QuoteSheetPage({
       </div>
 
       {stageSummary.length > 0 && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 px-6 py-2 border-b border-border bg-surface-alt text-[12px]">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 md:px-6 py-2 border-b border-border bg-surface-alt text-[12px]">
           <span className="font-semibold text-text-muted uppercase tracking-wide text-[11px]">Stages</span>
           {stageSummary.map(([key, count]) => (
             <a
@@ -251,7 +254,7 @@ export default async function QuoteSheetPage({
         </div>
       )}
 
-      <div className="px-6 py-3 border-b border-border">
+      <div className="px-4 md:px-6 py-3 border-b border-border">
         <div className="flex items-center gap-2 mb-1">
           <span className="font-semibold text-text-muted uppercase tracking-wide text-[11px]">Bulk Materials</span>
           <span className="text-[11px] text-text-muted">
@@ -383,7 +386,7 @@ export default async function QuoteSheetPage({
           <form
             key={bmId}
             action={applyBulkMaterialMatches.bind(null, bmId, id)}
-            className="px-6 py-3 border-b border-border bg-accent/5 space-y-2"
+            className="px-4 md:px-6 py-3 border-b border-border bg-accent/5 space-y-2"
           >
             <div className="text-[12px]">
               <span className="font-semibold">
@@ -424,7 +427,10 @@ export default async function QuoteSheetPage({
       <form action={updateQuoteSheetItems}>
         <input type="hidden" name="inspection_id" value={id} />
         <div role="table">
-          <div role="row" className={`grid ${ROW_COLS} gap-2 px-3 py-2.5 border-b border-border`}>
+          {/* Hidden below md: a header row for 6 columns has nothing to line
+              up with once ROW_COLS stacks to one column -- each stacked field
+              gets its own inline mobile label instead (below). */}
+          <div role="row" className={`hidden md:grid ${ROW_COLS} gap-2 px-3 py-2.5 border-b border-border`}>
             {['Area', 'Details', 'Comments', 'Vendor/GPM', 'Vendor Quote', 'Stage'].map((h) => (
               <div key={h} role="columnheader" className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
                 {h}
@@ -433,30 +439,48 @@ export default async function QuoteSheetPage({
           </div>
 
           {lineItems.length === 0 && (
-            <div className="px-6 py-6 text-[13px] text-text-muted">
+            <div className="px-4 md:px-6 py-6 text-[13px] text-text-muted">
               No line items to quote (everything has been removed from the Quote Sheet, or none exist yet).
             </div>
           )}
 
-          {lineItems.map((li) => {
+          {lineItems.map((li, index) => {
             const stageKey = li.stage_id ?? 'unassigned'
+            // A repeated small banner every time room_area changes -- lineItems
+            // is already ordered by (room_area, created_at), so this is just a
+            // "did the value change since the last row" check. Pure scanning
+            // anchor for a long list of otherwise visually-identical row
+            // blocks (/design-review, 2026-09-21): no data removed or hidden,
+            // just a landmark every few rows so a reviewer scrolling 50+ items
+            // can tell at a glance which room they're in.
+            const isNewRoom = index === 0 || lineItems[index - 1].room_area !== li.room_area
             return (
-            <div
-              key={li.id}
-              id={firstRowIdByStage.get(stageKey) === li.id ? stageAnchor(stageKey) : undefined}
-              role="row"
-              className={`grid ${ROW_COLS} gap-2 items-start px-3 pt-2.5 pb-2.5 border-b border-border scroll-mt-4`}
-            >
+            <div key={li.id}>
+              {isNewRoom && (
+                <div className="px-3 py-1.5 bg-surface-alt border-b border-border text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                  {li.room_area}
+                </div>
+              )}
+              <div
+                id={firstRowIdByStage.get(stageKey) === li.id ? stageAnchor(stageKey) : undefined}
+                role="row"
+                className={`grid ${ROW_COLS} gap-2 items-start px-3 pt-3 pb-4 border-b-2 border-border scroll-mt-4`}
+              >
               <input type="hidden" name="ids" value={li.id} />
               <input type="hidden" name={`room_area__${li.id}`} value={li.room_area} />
               <input type="hidden" name={`item__${li.id}`} value={li.item} />
-              <div role="cell" className="min-w-0 text-[12px] px-1.5 py-1 truncate" title={li.room_area}>
+              {/* Area's own room-group banner (above) already names it on
+                  every screen size; the per-row repeat is desktop-only
+                  scanning context, not additional data -- the hidden input
+                  above still submits it either way. */}
+              <div role="cell" className="hidden md:block min-w-0 text-[12px] px-1.5 py-1 truncate" title={li.room_area}>
                 {li.room_area}
               </div>
               <div role="cell" className="min-w-0 text-[12px] font-semibold px-1.5 py-1 truncate" title={li.item}>
                 {li.item}
               </div>
               <div role="cell" className="min-w-0 space-y-1">
+                <div className="md:hidden text-[10px] font-semibold uppercase tracking-wide text-text-muted">Comments</div>
                 <textarea
                   name={`observed_evidence__${li.id}`}
                   defaultValue={li.observed_evidence ?? ''}
@@ -480,6 +504,7 @@ export default async function QuoteSheetPage({
                 vendorEstimatedCost={li.vendor_estimated_cost}
               />
               <div role="cell" className="min-w-0">
+                <div className="md:hidden text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-0.5">Stage</div>
                 <select name={`stage_id__${li.id}`} defaultValue={li.stage_id ?? ''} className={miniField}>
                   <option value="">—</option>
                   {stages.map((s) => (
@@ -510,8 +535,8 @@ export default async function QuoteSheetPage({
                 </button>
               </div>
               <div role="cell" className="col-span-full mt-1 -mx-3 px-3 pt-2 pb-3 border-t border-border bg-accent/5 space-y-2">
-                <div className="text-center text-[10px] font-semibold uppercase tracking-wide text-text-muted">
-                  Materials for Above Section
+                <div className="text-center text-[10px] font-semibold uppercase tracking-wide text-text-muted truncate" title={`Materials — ${li.item}`}>
+                  Materials — {li.item}
                 </div>
 
                 <div className="flex flex-wrap items-end gap-3">
@@ -569,7 +594,7 @@ export default async function QuoteSheetPage({
                     <div className="w-16">
                       <input disabled defaultValue={row.quantity ?? ''} placeholder="Qty" title="Quantity" className={miniField} />
                     </div>
-                    <div className="w-16">
+                    <div className="w-20">
                       <input
                         disabled
                         defaultValue={row.materials_cost ?? ''}
@@ -578,7 +603,7 @@ export default async function QuoteSheetPage({
                         className={`${miniField} data-mono`}
                       />
                     </div>
-                    <div className="w-16">
+                    <div className="w-20">
                       <input
                         disabled
                         defaultValue={row.labor_hours ?? ''}
@@ -602,11 +627,12 @@ export default async function QuoteSheetPage({
                   <AddLineItemSku lineItemId={li.id} inspectionId={id} assignedTo={li.assigned_to} bulkMaterials={bulkMaterials} />
                 </div>
               </div>
+              </div>
             </div>
             )
           })}
         </div>
-        <div className="px-6 py-4 flex justify-end">
+        <div className="px-4 md:px-6 py-4 flex justify-end">
           <SaveChangesButton />
         </div>
       </form>

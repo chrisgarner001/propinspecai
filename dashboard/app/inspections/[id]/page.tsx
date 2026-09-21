@@ -57,7 +57,7 @@ type Vendor = { id: string; name: string }
 // independent grid container -- desyncs that row's column edges from the
 // header row's. minmax(0, ...) caps growth to the fr share so overflowing
 // content wraps/truncates inside the cell instead of pushing columns right.
-const ROW_COLS = 'grid-cols-[minmax(0,2fr)_minmax(0,0.8fr)_minmax(0,0.9fr)]'
+const ROW_COLS = 'grid-cols-1 md:grid-cols-[minmax(0,2fr)_minmax(0,0.8fr)_minmax(0,0.9fr)]'
 
 export default async function InspectionPage({
   params,
@@ -121,7 +121,7 @@ export default async function InspectionPage({
         </>
       }
     >
-      <div className="flex items-center justify-between gap-2 px-6 py-3 border-b border-border bg-surface-alt flex-wrap">
+      <div className="flex items-center justify-between gap-2 px-4 md:px-6 py-3 border-b border-border bg-surface-alt flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
           <a href={`/inspections/${id}/chargeback-review`} className={linkClass}>
             Tenant Chargeback Review
@@ -162,7 +162,7 @@ export default async function InspectionPage({
       {(inspection.source_video_drive_folder_url ||
         inspection.move_in_report_drive_url ||
         inspection.special_instructions) && (
-        <div className="px-6 py-3 border-b border-border bg-surface-alt space-y-2">
+        <div className="px-4 md:px-6 py-3 border-b border-border bg-surface-alt space-y-2">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
             {inspection.source_video_drive_folder_url && (
               <>
@@ -204,7 +204,7 @@ export default async function InspectionPage({
       )}
 
       {areas.length > 0 && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 px-6 py-3 border-b border-border bg-surface-alt">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 md:px-6 py-3 border-b border-border bg-surface-alt">
           {areas.map((area) => (
             <a
               key={area}
@@ -222,7 +222,7 @@ export default async function InspectionPage({
         <div role="table">
           <div
             role="row"
-            className={`grid ${ROW_COLS} gap-2 px-3 py-2.5 border-b border-border`}
+            className={`hidden md:grid ${ROW_COLS} gap-2 px-3 py-2.5 border-b border-border`}
           >
             {['Item', 'Condition', 'Remove from Quote Sheet'].map(
               (h) => (
@@ -296,6 +296,7 @@ export default async function InspectionPage({
                 </div>
               </div>
               <div role="cell" className="min-w-0">
+                <div className="md:hidden text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-0.5">Condition</div>
                 <select
                   name={`condition__${li.id}`}
                   defaultValue={li.condition}
@@ -308,25 +309,26 @@ export default async function InspectionPage({
                   ))}
                 </select>
               </div>
-              <div role="cell" className="min-w-0 flex justify-center">
+              <div role="cell" className="min-w-0 flex items-center gap-2 md:justify-center">
                 <input
                   type="checkbox"
                   name={`tenant_approved__${li.id}`}
                   defaultChecked={li.tenant_approved}
                   className="h-4 w-4 cursor-pointer accent-error"
                 />
+                <span className="md:hidden text-[11px] text-text-muted">Remove from Quote Sheet</span>
               </div>
             </div>
           ))}
         </div>
-        <div className="px-6 py-4 border-b border-border flex justify-end">
+        <div className="px-4 md:px-6 py-4 border-b border-border flex justify-end">
           <SaveChangesButton />
         </div>
       </form>
 
-      <div className="px-6 py-5">
+      <div className="px-4 md:px-6 py-5">
         <h2 className="font-display font-bold text-[15px] mb-3">Add a line item</h2>
-        <form action={addLineItem} className="grid grid-cols-6 gap-2 items-end">
+        <form action={addLineItem} className="grid grid-cols-2 md:grid-cols-6 gap-2 items-end">
           <input type="hidden" name="inspection_id" value={id} />
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1">
@@ -380,7 +382,7 @@ export default async function InspectionPage({
           </div>
           <button
             type="submit"
-            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-2 text-[12px] font-semibold col-span-6 w-fit"
+            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-2 text-[12px] font-semibold col-span-2 md:col-span-6 w-fit"
           >
             Add Item
           </button>

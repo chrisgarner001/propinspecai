@@ -117,7 +117,7 @@ export default function AddLineItemSku({
         <div className="w-16">
           <input value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="Qty" title="Quantity" className={miniField} />
         </div>
-        <div className="w-16">
+        <div className="w-20">
           <input
             value={materialsCost}
             onChange={(e) => setMaterialsCost(e.target.value)}
@@ -129,7 +129,7 @@ export default function AddLineItemSku({
             className={costField}
           />
         </div>
-        <div className="w-16">
+        <div className="w-20">
           <LaborHoursInput
             defaultValue={laborHours}
             disabled={!selfPerformed}

@@ -38,6 +38,7 @@ export default function LineItemVendorAssignment({
   return (
     <>
       <div role="cell" className="min-w-0 space-y-1">
+        <div className="md:hidden text-[10px] font-semibold uppercase tracking-wide text-text-muted">Vendor/GPM</div>
         <select
           name={`assigned_to__${id}`}
           value={assignedTo}
@@ -53,16 +54,18 @@ export default function LineItemVendorAssignment({
         </select>
         {outsideVendor && <VendorSelect name={`vendor_id__${id}`} vendors={vendors} defaultValue={vendorId} />}
       </div>
-      <input
-        role="cell"
-        name={`vendor_estimated_cost__${id}`}
-        type="number"
-        step="5"
-        defaultValue={vendorEstimatedCost ?? ''}
-        disabled={!outsideVendor}
-        placeholder="—"
-        className={costField}
-      />
+      <div role="cell" className="min-w-0">
+        <div className="md:hidden text-[10px] font-semibold uppercase tracking-wide text-text-muted">Vendor Quote</div>
+        <input
+          name={`vendor_estimated_cost__${id}`}
+          type="number"
+          step="5"
+          defaultValue={vendorEstimatedCost ?? ''}
+          disabled={!outsideVendor}
+          placeholder="—"
+          className={costField}
+        />
+      </div>
     </>
   )
 }

@@ -26,7 +26,10 @@ export default function LineItemMaterialsCost({
 
   return (
     <>
-      <div className="w-16">
+      {/* w-20, not w-16 like Qty: a real 2-decimal value ("0.15") in JetBrains
+          Mono needs ~69px and was clipping in a 64px box -- measured on a
+          live page during /design-review, not a style guess. */}
+      <div className="w-20">
         <input
           name={`materials_cost__${id}`}
           type="number"
@@ -38,7 +41,7 @@ export default function LineItemMaterialsCost({
           className={costField}
         />
       </div>
-      <div className="w-16">
+      <div className="w-20">
         <LaborHoursInput
           name={`labor_hours__${id}`}
           defaultValue={laborHours}
