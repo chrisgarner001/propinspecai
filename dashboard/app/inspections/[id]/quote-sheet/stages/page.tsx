@@ -36,6 +36,51 @@ type LineItem = {
 type Vendor = { id: string; name: string }
 type Stage = { id: string; name: string; sort_order: number }
 
+function ItemsTable({
+  items,
+  vendorName,
+  lineTotal,
+}: {
+  items: LineItem[]
+  vendorName: (vendorId: string | null) => string
+  lineTotal: (li: LineItem) => number
+}) {
+  return (
+    <>
+      <table className="hidden md:table w-full text-[13px] border-collapse">
+        <tbody>
+          {items.map((li) => (
+            <tr key={li.id} className="border-b border-border">
+              <td className="px-6 py-2 w-[25%]">
+                <div className="text-[10px] uppercase tracking-wide text-text-muted">{li.room_area}</div>
+                <div className="font-semibold">{li.item}</div>
+              </td>
+              <td className="px-3 py-2 text-text-muted">
+                {li.assigned_to === 'Outside Vendor' ? vendorName(li.vendor_id) : (li.assigned_to ?? '—')}
+              </td>
+              <td className="px-3 py-2 text-right data-mono">${lineTotal(li).toFixed(2)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="md:hidden">
+        {items.map((li) => (
+          <div key={li.id} className="px-4 py-2.5 border-b border-border flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[10px] uppercase tracking-wide text-text-muted">{li.room_area}</div>
+              <div className="font-semibold text-[13px]">{li.item}</div>
+              <div className="text-[12px] text-text-muted">
+                {li.assigned_to === 'Outside Vendor' ? vendorName(li.vendor_id) : (li.assigned_to ?? '—')}
+              </div>
+            </div>
+            <div className="data-mono text-[13px] whitespace-nowrap">${lineTotal(li).toFixed(2)}</div>
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
 export default async function QuoteSheetStagesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const sql = getSql()
@@ -100,7 +145,7 @@ export default async function QuoteSheetStagesPage({ params }: { params: Promise
 
   return (
     <AppShell active="/" title={`Stage View — ${inspection.property_address}`} wide>
-      <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-surface-alt">
+      <div className="flex items-center justify-between px-4 md:px-6 py-3 border-b border-border bg-surface-alt flex-wrap gap-2">
         <div className="text-[13px] text-text-muted">
           {inspection.property_address} · Job <span className="data-mono">{inspection.job_number}</span>
         </div>
@@ -113,7 +158,7 @@ export default async function QuoteSheetStagesPage({ params }: { params: Promise
       </div>
 
       {batches.size === 0 && (
-        <div className="px-6 py-6 text-[13px] text-text-muted">
+        <div className="px-4 md:px-6 py-6 text-[13px] text-text-muted">
           No batches yet. Go to Regular View, set a Stage on each item, then click &quot;Create Batches&quot;.
         </div>
       )}
@@ -122,8 +167,8 @@ export default async function QuoteSheetStagesPage({ params }: { params: Promise
         const total = items.reduce((sum, li) => sum + lineTotal(li), 0)
         return (
           <div key={batchNumber} className="border-b border-border">
-            <div className="flex items-center justify-between gap-4 px-6 py-3 bg-surface-alt">
-              <div className="flex items-center gap-3">
+            <div className="flex items-center justify-between gap-4 px-4 md:px-6 py-3 bg-surface-alt flex-wrap">
+              <div className="flex items-center gap-3 flex-wrap">
                 <span className="font-display font-bold text-[14px]">{stageLabel(items)}</span>
                 <span className="text-[13px] text-text-muted">{assigneeLabel(items)}</span>
                 <span className="data-mono text-[11px] text-text-muted">{items.length} item(s)</span>
@@ -139,54 +184,22 @@ export default async function QuoteSheetStagesPage({ params }: { params: Promise
                 </a>
               </div>
             </div>
-            <table className="w-full text-[13px] border-collapse">
-              <tbody>
-                {items.map((li) => (
-                  <tr key={li.id} className="border-b border-border">
-                    <td className="px-6 py-2 w-[25%]">
-                      <div className="text-[10px] uppercase tracking-wide text-text-muted">{li.room_area}</div>
-                      <div className="font-semibold">{li.item}</div>
-                    </td>
-                    <td className="px-3 py-2 text-text-muted">
-                      {li.assigned_to === 'Outside Vendor' ? vendorName(li.vendor_id) : (li.assigned_to ?? '—')}
-                    </td>
-                    <td className="px-3 py-2 text-right data-mono">${lineTotal(li).toFixed(2)}</td>
-                  </tr>
-                ))}
-                <tr>
-                  <td className="px-6 py-2" colSpan={2}>
-                    <span className="font-semibold text-[12px]">Batch Total</span>
-                  </td>
-                  <td className="px-3 py-2 text-right data-mono font-semibold">${total.toFixed(2)}</td>
-                </tr>
-              </tbody>
-            </table>
+            <ItemsTable items={items} vendorName={vendorName} lineTotal={lineTotal} />
+            <div className="flex items-center justify-between px-4 md:px-6 py-2 border-b border-border">
+              <span className="font-semibold text-[12px]">Batch Total</span>
+              <span className="data-mono font-semibold text-[13px]">${total.toFixed(2)}</span>
+            </div>
           </div>
         )
       })}
 
       {unbatched.length > 0 && (
         <div className="border-b border-border">
-          <div className="px-6 py-3 bg-surface-alt">
+          <div className="px-4 md:px-6 py-3 bg-surface-alt">
             <span className="font-display font-bold text-[14px]">Unbatched</span>
             <span className="data-mono text-[11px] text-text-muted ml-2">{unbatched.length} item(s)</span>
           </div>
-          <table className="w-full text-[13px] border-collapse">
-            <tbody>
-              {unbatched.map((li) => (
-                <tr key={li.id} className="border-b border-border">
-                  <td className="px-6 py-2 w-[25%]">
-                    <div className="text-[10px] uppercase tracking-wide text-text-muted">{li.room_area}</div>
-                    <div className="font-semibold">{li.item}</div>
-                  </td>
-                  <td className="px-3 py-2 text-text-muted">
-                    {li.assigned_to === 'Outside Vendor' ? vendorName(li.vendor_id) : (li.assigned_to ?? '—')}
-                  </td>
-                  <td className="px-3 py-2 text-right data-mono">${lineTotal(li).toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <ItemsTable items={unbatched} vendorName={vendorName} lineTotal={lineTotal} />
         </div>
       )}
     </AppShell>

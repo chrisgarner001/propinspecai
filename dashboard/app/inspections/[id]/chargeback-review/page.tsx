@@ -51,11 +51,11 @@ export default async function ChargebackReviewPage({ params }: { params: Promise
 
   return (
     <AppShell active="/" title={`Tenant Chargeback Review — ${inspection.property_address}`} wide>
-      <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-surface-alt flex-wrap gap-2">
+      <div className="flex items-center justify-between px-4 md:px-6 py-3 border-b border-border bg-surface-alt flex-wrap gap-2">
         <div className="text-[13px] text-text-muted">
           {inspection.property_address} · Job <span className="data-mono">{inspection.job_number}</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <a
             href={`/inspections/${id}/move-out-report`}
             target="_blank"
@@ -72,7 +72,7 @@ export default async function ChargebackReviewPage({ params }: { params: Promise
         </div>
       </div>
 
-      <div className="flex items-center gap-4 px-6 py-2 border-b border-border text-[12px]">
+      <div className="flex items-center gap-4 px-4 md:px-6 py-2 border-b border-border text-[12px] flex-wrap">
         <span className="font-semibold text-text-muted uppercase tracking-wide text-[11px]">Chargebacks</span>
         <span className="data-mono text-text-muted">{chargedItems.length} item(s)</span>
         <span className="data-mono font-semibold">${chargedTotal.toFixed(2)}</span>
@@ -83,16 +83,16 @@ export default async function ChargebackReviewPage({ params }: { params: Promise
         <input type="hidden" name="inspection_id" value={id} />
 
         {lineItems.length === 0 && (
-          <div className="px-6 py-6 text-[13px] text-text-muted">No line items recorded for this inspection.</div>
+          <div className="px-4 md:px-6 py-6 text-[13px] text-text-muted">No line items recorded for this inspection.</div>
         )}
 
         {[...roomGroups.entries()].map(([room, items]) => (
           <div key={room}>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-muted px-6 pt-3 pb-1">{room}</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-muted px-4 md:px-6 pt-3 pb-1">{room}</div>
             {items.map((li) => (
               <div
                 key={li.id}
-                className="grid grid-cols-[1fr_auto] gap-4 px-6 py-2.5 border-b border-border items-start"
+                className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 md:gap-4 px-4 md:px-6 py-2.5 border-b border-border items-start"
               >
                 <input type="hidden" name="ids" value={li.id} />
                 <div className="min-w-0 space-y-1">
@@ -112,7 +112,7 @@ export default async function ChargebackReviewPage({ params }: { params: Promise
           </div>
         ))}
 
-        <div className="px-6 py-4 flex justify-end">
+        <div className="px-4 md:px-6 py-4 flex justify-end">
           <button
             type="submit"
             className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-4 py-2 text-[13px] font-semibold"

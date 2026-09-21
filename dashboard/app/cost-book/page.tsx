@@ -49,12 +49,14 @@ const emptyRowClass = 'px-3 py-3 text-[13px] text-text-muted italic'
 
 function SectionHeading({ title, description }: { title: string; description: string }) {
   return (
-    <div className="px-6 pt-6 pb-3">
+    <div className="px-4 md:px-6 pt-6 pb-3">
       <h2 className="font-display font-bold text-[15px]">{title}</h2>
       <p className="text-[13px] text-text-muted mt-0.5">{description}</p>
     </div>
   )
 }
+
+const mobileLabelClass = 'md:hidden text-[10px] font-semibold uppercase tracking-wide text-text-muted'
 
 export default async function CostBookPage() {
   const sql = getSql()
@@ -70,13 +72,13 @@ export default async function CostBookPage() {
     select * from cost_book_vendor_estimates order by trade_category, task_name
   `) as unknown as VendorEstimate[]
 
-  const laborCols = 'grid-cols-[1.6fr_0.7fr_0.9fr_1.8fr_0.6fr]'
-  const materialCols = 'grid-cols-[1.6fr_0.7fr_0.7fr_0.9fr_0.9fr_1.6fr_0.6fr]'
-  const vendorCols = 'grid-cols-[1.1fr_1.4fr_0.8fr_1fr_1.6fr_0.6fr]'
+  const laborCols = 'grid-cols-1 md:grid-cols-[1.6fr_0.7fr_0.9fr_1.8fr_0.6fr]'
+  const materialCols = 'grid-cols-1 md:grid-cols-[1.6fr_0.7fr_0.7fr_0.9fr_0.9fr_1.6fr_0.6fr]'
+  const vendorCols = 'grid-cols-1 md:grid-cols-[1.1fr_1.4fr_0.8fr_1fr_1.6fr_0.6fr]'
 
   return (
     <AppShell active="/setup" title="Cost Book">
-      <p className="px-6 pt-5 text-[13px] text-text-muted max-w-2xl">
+      <p className="px-4 md:px-6 pt-5 text-[13px] text-text-muted max-w-2xl">
         GPM&apos;s reference pricing. Vendor estimates are placeholders only, used until a real vendor quote comes
         in for a specific job.
       </p>
@@ -87,8 +89,8 @@ export default async function CostBookPage() {
           title="GPM Labor"
           description="Per-item labor charge for tasks GPM staff perform themselves."
         />
-        <div role="table" className="overflow-x-auto">
-          <div role="row" className={`grid ${laborCols} gap-2 px-6 py-2 border-y border-border min-w-[720px]`}>
+        <div role="table">
+          <div role="row" className={`hidden md:grid ${laborCols} gap-2 px-4 md:px-6 py-2 border-y border-border`}>
             {['Task', 'Rate', 'Unit', 'Notes', ''].map((h) => (
               <div key={h} role="columnheader" className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
                 {h}
@@ -101,20 +103,29 @@ export default async function CostBookPage() {
               key={r.id}
               action={updateGpmLaborRate}
               role="row"
-              className={`grid ${laborCols} gap-2 items-center px-6 py-2.5 border-b border-border min-w-[720px]`}
+              className={`grid ${laborCols} gap-2 md:items-center px-4 md:px-6 py-3 md:py-2.5 border-b-2 md:border-b border-border`}
             >
               <input type="hidden" name="id" value={r.id} />
               <div role="cell" className="font-medium">{r.task_name}</div>
-              <input role="cell" name="labor_rate" type="number" step="0.01" defaultValue={r.labor_rate} className={dataInputClass} />
-              <input role="cell" name="unit" defaultValue={r.unit} className={inputClass} />
-              <input role="cell" name="notes" defaultValue={r.notes ?? ''} className={inputClass} />
+              <div role="cell" className="space-y-1">
+                <div className={mobileLabelClass}>Rate</div>
+                <input name="labor_rate" type="number" step="0.01" defaultValue={r.labor_rate} className={dataInputClass} />
+              </div>
+              <div role="cell" className="space-y-1">
+                <div className={mobileLabelClass}>Unit</div>
+                <input name="unit" defaultValue={r.unit} className={inputClass} />
+              </div>
+              <div role="cell" className="space-y-1">
+                <div className={mobileLabelClass}>Notes</div>
+                <input name="notes" defaultValue={r.notes ?? ''} className={inputClass} />
+              </div>
               <div role="cell">
                 <button type="submit" className={saveButtonClass}>Save</button>
               </div>
             </form>
           ))}
         </div>
-        <form action={addGpmLaborRate} className={`grid ${laborCols} gap-2 items-end px-6 py-4`}>
+        <form action={addGpmLaborRate} className={`grid ${laborCols} gap-2 items-end px-4 md:px-6 py-4`}>
           <input name="task_name" required placeholder="Task name" className={inputClass} />
           <input name="labor_rate" type="number" step="0.01" required placeholder="Rate" className={dataInputClass} />
           <input name="unit" defaultValue="per item" placeholder="Unit" className={inputClass} />
@@ -129,8 +140,8 @@ export default async function CostBookPage() {
           title="Materials"
           description="Most materials are purchased from Home Depot. Not yet seeded from receipts — add the last 6 months of purchases here (or provide the receipts and they can be imported in bulk)."
         />
-        <div role="table" className="overflow-x-auto">
-          <div role="row" className={`grid ${materialCols} gap-2 px-6 py-2 border-y border-border min-w-[860px]`}>
+        <div role="table">
+          <div role="row" className={`hidden md:grid ${materialCols} gap-2 px-4 md:px-6 py-2 border-y border-border`}>
             {['Material', 'Price', 'Unit', 'Source', 'SKU', 'Notes', ''].map((h) => (
               <div key={h} role="columnheader" className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
                 {h}
@@ -147,22 +158,37 @@ export default async function CostBookPage() {
               key={m.id}
               action={updateMaterial}
               role="row"
-              className={`grid ${materialCols} gap-2 items-center px-6 py-2.5 border-b border-border min-w-[860px]`}
+              className={`grid ${materialCols} gap-2 md:items-center px-4 md:px-6 py-3 md:py-2.5 border-b-2 md:border-b border-border`}
             >
               <input type="hidden" name="id" value={m.id} />
               <div role="cell" className="font-medium">{m.material_name}</div>
-              <input role="cell" name="unit_price" type="number" step="0.01" defaultValue={m.unit_price} className={dataInputClass} />
-              <input role="cell" name="unit" defaultValue={m.unit} className={inputClass} />
-              <input role="cell" name="source" defaultValue={m.source} className={inputClass} />
-              <input role="cell" name="sku" defaultValue={m.sku ?? ''} className={`data-mono ${inputClass}`} />
-              <input role="cell" name="notes" defaultValue={m.notes ?? ''} className={inputClass} />
+              <div role="cell" className="space-y-1">
+                <div className={mobileLabelClass}>Price</div>
+                <input name="unit_price" type="number" step="0.01" defaultValue={m.unit_price} className={dataInputClass} />
+              </div>
+              <div role="cell" className="space-y-1">
+                <div className={mobileLabelClass}>Unit</div>
+                <input name="unit" defaultValue={m.unit} className={inputClass} />
+              </div>
+              <div role="cell" className="space-y-1">
+                <div className={mobileLabelClass}>Source</div>
+                <input name="source" defaultValue={m.source} className={inputClass} />
+              </div>
+              <div role="cell" className="space-y-1">
+                <div className={mobileLabelClass}>SKU</div>
+                <input name="sku" defaultValue={m.sku ?? ''} className={`data-mono ${inputClass}`} />
+              </div>
+              <div role="cell" className="space-y-1">
+                <div className={mobileLabelClass}>Notes</div>
+                <input name="notes" defaultValue={m.notes ?? ''} className={inputClass} />
+              </div>
               <div role="cell">
                 <button type="submit" className={saveButtonClass}>Save</button>
               </div>
             </form>
           ))}
         </div>
-        <form action={addMaterial} className="grid grid-cols-[1.6fr_0.7fr_0.7fr_0.9fr_0.9fr_0.6fr] gap-2 items-end px-6 py-4">
+        <form action={addMaterial} className="grid grid-cols-1 md:grid-cols-[1.6fr_0.7fr_0.7fr_0.9fr_0.9fr_0.6fr] gap-2 items-end px-4 md:px-6 py-4">
           <input name="material_name" required placeholder="Material name" className={inputClass} />
           <input name="unit_price" type="number" step="0.01" required placeholder="Price" className={dataInputClass} />
           <input name="unit" defaultValue="each" placeholder="Unit" className={inputClass} />
@@ -178,8 +204,8 @@ export default async function CostBookPage() {
           title="Vendor Estimates"
           description={'Placeholder rates used until a real vendor quote exists for this specific job. Uncheck "Placeholder" once a real quote replaces it.'}
         />
-        <div role="table" className="overflow-x-auto">
-          <div role="row" className={`grid ${vendorCols} gap-2 px-6 py-2 border-y border-border min-w-[820px]`}>
+        <div role="table">
+          <div role="row" className={`hidden md:grid ${vendorCols} gap-2 px-4 md:px-6 py-2 border-y border-border`}>
             {['Trade', 'Task', 'Est. Cost', 'Placeholder?', 'Notes', ''].map((h) => (
               <div key={h} role="columnheader" className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
                 {h}
@@ -192,24 +218,30 @@ export default async function CostBookPage() {
               key={v.id}
               action={updateVendorEstimate}
               role="row"
-              className={`grid ${vendorCols} gap-2 items-center px-6 py-2.5 border-b border-border min-w-[820px]`}
+              className={`grid ${vendorCols} gap-2 md:items-center px-4 md:px-6 py-3 md:py-2.5 border-b-2 md:border-b border-border`}
             >
               <input type="hidden" name="id" value={v.id} />
               <div role="cell" className="text-text-muted">{v.trade_category}</div>
               <div role="cell" className="font-medium">{v.task_name}</div>
-              <input role="cell" name="estimated_cost" type="number" step="0.01" defaultValue={v.estimated_cost} className={dataInputClass} />
+              <div role="cell" className="space-y-1">
+                <div className={mobileLabelClass}>Est. Cost</div>
+                <input name="estimated_cost" type="number" step="0.01" defaultValue={v.estimated_cost} className={dataInputClass} />
+              </div>
               <label role="cell" className="flex items-center gap-1.5 text-[12px] text-text-muted whitespace-nowrap">
                 <input type="checkbox" name="is_placeholder" defaultChecked={v.is_placeholder} />
                 Placeholder
               </label>
-              <input role="cell" name="notes" defaultValue={v.notes ?? ''} className={inputClass} />
+              <div role="cell" className="space-y-1">
+                <div className={mobileLabelClass}>Notes</div>
+                <input name="notes" defaultValue={v.notes ?? ''} className={inputClass} />
+              </div>
               <div role="cell">
                 <button type="submit" className={saveButtonClass}>Save</button>
               </div>
             </form>
           ))}
         </div>
-        <form action={addVendorEstimate} className="grid grid-cols-[1.1fr_1.4fr_0.8fr_1.6fr_0.6fr] gap-2 items-end px-6 py-4">
+        <form action={addVendorEstimate} className="grid grid-cols-1 md:grid-cols-[1.1fr_1.4fr_0.8fr_1.6fr_0.6fr] gap-2 items-end px-4 md:px-6 py-4">
           <input name="trade_category" required placeholder="Trade category" className={inputClass} />
           <input name="task_name" required placeholder="Task" className={inputClass} />
           <input name="estimated_cost" type="number" step="0.01" required placeholder="Est. cost" className={dataInputClass} />

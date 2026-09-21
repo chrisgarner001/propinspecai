@@ -24,8 +24,8 @@ export default async function SetupPage() {
 
   return (
     <AppShell active="/setup" title="Set Up">
-      <form action={updateSettings} className="p-6 max-w-xl space-y-6">
-        <div className="flex items-center justify-between gap-6 pb-4 border-b border-border">
+      <form action={updateSettings} className="p-4 md:p-6 max-w-xl space-y-6">
+        <div className="flex items-center justify-between flex-wrap gap-3 md:gap-6 pb-4 border-b border-border">
           <div>
             <div className={labelClass}>GPM Labor Charge</div>
             <div className={helpClass}>Default per-hour labor charge for GPM staff-performed work.</div>
@@ -42,7 +42,7 @@ export default async function SetupPage() {
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-6 pb-4 border-b border-border">
+        <div className="flex items-center justify-between flex-wrap gap-3 md:gap-6 pb-4 border-b border-border">
           <div>
             <div className={labelClass}>General Material Markup</div>
             <div className={helpClass}>Percentage added on top of material cost when charged out.</div>
@@ -59,7 +59,7 @@ export default async function SetupPage() {
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-6 pb-4 border-b border-border">
+        <div className="flex items-center justify-between flex-wrap gap-3 md:gap-6 pb-4 border-b border-border">
           <div>
             <div className={labelClass}>Vendor Markup</div>
             <div className={helpClass}>Percentage added on top of outside vendor estimates when charged out.</div>
@@ -84,7 +84,7 @@ export default async function SetupPage() {
         </button>
       </form>
 
-      <div className="p-6 max-w-xl border-t border-border">
+      <div className="p-4 md:p-6 max-w-xl border-t border-border">
         <div className={labelClass}>Vendors</div>
         <div className={`${helpClass} mb-3`}>Outside vendors available in the Assigned To picker on inspections.</div>
         {vendors.length > 0 && (
@@ -116,7 +116,7 @@ export default async function SetupPage() {
         </form>
       </div>
 
-      <div className="p-6 max-w-xl border-t border-border">
+      <div className="p-4 md:p-6 max-w-xl border-t border-border">
         <div className={labelClass}>Stages</div>
         <div className={`${helpClass} mb-3`}>The rehab/turn stages used on the Quote Sheet and Job Timeline, and their display order.</div>
         <Link
@@ -127,7 +127,7 @@ export default async function SetupPage() {
         </Link>
       </div>
 
-      <div className="p-6 max-w-xl border-t border-border">
+      <div className="p-4 md:p-6 max-w-xl border-t border-border">
         <div className={labelClass}>Cost Book</div>
         <div className={`${helpClass} mb-3`}>Reference pricing for materials and labor used across inspections.</div>
         <Link

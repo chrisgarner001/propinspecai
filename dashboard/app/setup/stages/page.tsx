@@ -21,7 +21,7 @@ export default async function StagesSetupPage() {
 
   return (
     <AppShell active="/setup" title="Set Up — Stages">
-      <div className="p-6 max-w-xl">
+      <div className="p-4 md:p-6 max-w-xl">
         <div className="font-medium">Stages</div>
         <div className="text-[12px] text-text-muted mt-1 mb-3">
           The rehab/turn stages available on the Quote Sheet and Job Timeline. Order here is the order they appear in
