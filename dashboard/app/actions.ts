@@ -6,6 +6,8 @@ import { redirect } from 'next/navigation'
 import { parseFolderIdFromUrl, listVideosInFolder, downloadDriveFile } from '@/lib/google'
 import { extractLineItemsFromVideo } from '@/lib/gemini'
 import { parseTimestampSeconds, extractFrame, uploadStill } from '@/lib/stills'
+import { askHelpAssistant, type HelpMessage } from '@/lib/helpAssistant'
+import { getPageContext } from '@/lib/helpContext'
 import { writeFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -878,4 +880,23 @@ export async function createImageShareLink(
     values (${inspectionId}, ${token}, ${sql.json(images)})
   `
   return { url: `/share/${token}` }
+}
+
+// AI help widget (docs/designs/ai-help-widget.md) -- called directly from
+// HelpWidget.tsx's onClick, not a form, same reasoning as createImageShareLink
+// above. `pathname` drives lib/helpContext.ts's route match so the assistant
+// can answer "why does this show X" using the real data on the reviewer's
+// current screen, not just static workflow help.
+export async function askHelp(
+  pathname: string,
+  question: string,
+  history: HelpMessage[]
+): Promise<{ answer?: string; error?: string }> {
+  try {
+    const pageData = await getPageContext(pathname)
+    const answer = await askHelpAssistant(question, history, pageData)
+    return { answer }
+  } catch (err) {
+    return { error: (err as Error).message || 'Something went wrong asking the assistant.' }
+  }
 }

@@ -1,6 +1,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import RecentNav from './RecentNav'
+import HelpWidget from './HelpWidget'
 
 const NAV_ITEMS = [
   { href: '/', label: 'Inspections' },
@@ -80,6 +81,7 @@ export default function AppShell({
         </header>
         <main>{children}</main>
       </div>
+      <HelpWidget />
     </div>
   )
 }
