@@ -104,7 +104,7 @@ export default async function InspectionPage({
 
   return (
     <AppShell
-      active="/"
+      active="/inspections"
       title={inspection.property_address}
       wide
       headerContent={

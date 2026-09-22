@@ -12,7 +12,7 @@ const SPECIAL_INSTRUCTIONS_EXAMPLE = `The house has serious damage to the walls 
 export default async function NewInspectionPage() {
   await requireSession()
   return (
-    <AppShell active="/" title="Add new inspection">
+    <AppShell active="/inspections" title="Add new inspection">
       <form action={createInspection} className="p-6 max-w-lg space-y-4">
         <div>
           <label className={labelClass}>Inspection type</label>

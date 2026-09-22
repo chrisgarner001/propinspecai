@@ -748,6 +748,7 @@ export async function createInspection(formData: FormData) {
   `
 
   revalidatePath('/')
+  revalidatePath('/inspections')
   redirect(`/inspections/${row.id}`)
 }
 
@@ -778,7 +779,8 @@ export async function deleteInspection(id: string, _formData: FormData) {
   const sql = getSql()
   await sql`delete from inspections where id = ${id}`
   revalidatePath('/')
-  redirect('/')
+  revalidatePath('/inspections')
+  redirect('/inspections')
 }
 
 export async function updateInspectionStatus(formData: FormData) {
@@ -791,6 +793,50 @@ export async function updateInspectionStatus(formData: FormData) {
 
   revalidatePath(`/inspections/${inspectionId}`)
   revalidatePath('/')
+  revalidatePath('/inspections')
+}
+
+// Manual entry for now -- no real PropertyWare API access/docs exist
+// anywhere in this project yet (same stand-in-now-swap-in-real-API-later
+// pattern as sendBatchToPW). pw_property_id is a placeholder for that
+// future real link; left null until it exists. Deliberately not linked to
+// inspections.property_address -- see migration 0035's own comment.
+export async function createProperty(formData: FormData) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  const address = String(formData.get('address') ?? '').trim()
+  if (!address) return
+  const pwPropertyId = String(formData.get('pw_property_id') || '').trim() || null
+  const notes = String(formData.get('notes') || '').trim() || null
+
+  await sql`insert into properties (address, pw_property_id, notes) values (${address}, ${pwPropertyId}, ${notes})`
+
+  revalidatePath('/properties')
+}
+
+export async function updateProperty(propertyId: string, formData: FormData) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  const address = String(formData.get('address') ?? '').trim()
+  if (!address) return
+  const pwPropertyId = String(formData.get('pw_property_id') || '').trim() || null
+  const notes = String(formData.get('notes') || '').trim() || null
+
+  await sql`
+    update properties
+    set address = ${address}, pw_property_id = ${pwPropertyId}, notes = ${notes}
+    where id = ${propertyId}
+  `
+
+  revalidatePath('/properties')
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, propertyId) call site; formAction always passes the triggering form's FormData last
+export async function deleteProperty(propertyId: string, _formData: FormData) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  await sql`delete from properties where id = ${propertyId}`
+  revalidatePath('/properties')
 }
 
 export async function createVendor(formData: FormData) {

@@ -187,7 +187,7 @@ export default async function QuoteSheetPage({
     additionalSkus.reduce((sum, row) => sum + Number(row.materials_cost ?? 0), 0)
 
   return (
-    <AppShell active="/" title={`Quote Sheet — ${inspection.property_address}`} wide>
+    <AppShell active="/inspections" title={`Quote Sheet — ${inspection.property_address}`} wide>
       <div className="flex items-center justify-between flex-wrap gap-2 px-4 py-3 md:px-4 md:px-6 border-b border-border bg-surface-alt">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="text-[13px] text-text-muted">

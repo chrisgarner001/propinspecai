@@ -6,7 +6,9 @@ import MobileNav from './MobileNav'
 import LogoutButton from './LogoutButton'
 
 const NAV_ITEMS = [
-  { href: '/', label: 'Inspections' },
+  { href: '/', label: 'Dashboard' },
+  { href: '/inspections', label: 'Inspections' },
+  { href: '/properties', label: 'Properties' },
   { href: '/dispatch-board', label: 'Dispatch Board' },
   { href: '/setup', label: 'Set Up' },
 ]

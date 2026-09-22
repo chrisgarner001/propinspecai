@@ -54,7 +54,7 @@ export default async function ChargebackReviewPage({ params }: { params: Promise
   const chargedTotal = chargedItems.reduce((sum, li) => sum + Number(li.tenant_charge_amount ?? 0), 0)
 
   return (
-    <AppShell active="/" title={`Tenant Chargeback Review — ${inspection.property_address}`} wide>
+    <AppShell active="/inspections" title={`Tenant Chargeback Review — ${inspection.property_address}`} wide>
       <div className="flex items-center justify-between px-4 md:px-6 py-3 border-b border-border bg-surface-alt flex-wrap gap-2">
         <div className="text-[13px] text-text-muted">
           {inspection.property_address} · Job <span className="data-mono">{inspection.job_number}</span>

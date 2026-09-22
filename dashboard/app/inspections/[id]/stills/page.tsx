@@ -37,7 +37,7 @@ export default async function InspectionStillsPage({ params }: { params: Promise
   }
 
   return (
-    <AppShell active="/" title={`Image Folder — ${inspection.property_address}`} wide>
+    <AppShell active="/inspections" title={`Image Folder — ${inspection.property_address}`} wide>
       <ImageShareGallery
         inspectionId={id}
         backHref={`/inspections/${id}`}
