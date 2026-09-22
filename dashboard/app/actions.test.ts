@@ -25,6 +25,16 @@ vi.mock('@/lib/dal', () => {
   }
 })
 
+// lib/embeddings.ts imports 'server-only', which fails to resolve under
+// Vitest (it's a webpack-alias marker package, not a real module) -- mocked
+// out like @/lib/dal above. No test here
+// exercises suggestHistoricalCost/applyHistoricalCostSuggestion (the only
+// callers), this just lets app/actions.ts's module-level import resolve.
+vi.mock('@/lib/embeddings', () => ({
+  embedText: vi.fn(async () => null),
+  toVectorLiteral: vi.fn((v) => `[${v.join(',')}]`),
+}))
+
 // Drive/Gemini calls are mocked -- these tests verify the DB state machine
 // (pending -> processing -> done/failed, line items inserted or not), not
 // real network calls to Google's APIs. parseFolderIdFromUrl is real (pure

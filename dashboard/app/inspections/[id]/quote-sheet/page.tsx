@@ -16,6 +16,7 @@ import { matchBulkMaterialCandidates } from '@/lib/bulkMatch'
 import AppShell from '@/app/components/AppShell'
 import AddLineItemSku from '@/app/components/AddLineItemSku'
 import LinkBulkMaterialSelect from '@/app/components/LinkBulkMaterialSelect'
+import SuggestCostFromHistory from '@/app/components/SuggestCostFromHistory'
 import LineItemVendorAssignment from '@/app/components/LineItemVendorAssignment'
 import LineItemMaterialsCost from '@/app/components/LineItemMaterialsCost'
 import RemoveSectionControl from '@/app/components/RemoveSectionControl'
@@ -589,6 +590,10 @@ export default async function QuoteSheetPage({
                     <span className="text-[11px] text-text-muted">or</span>
                     <LinkBulkMaterialSelect lineItemId={li.id} inspectionId={id} bulkMaterials={bulkMaterials} />
                   </div>
+                )}
+
+                {!li.supplier && !li.sku && !li.materials_cost && (
+                  <SuggestCostFromHistory lineItemId={li.id} inspectionId={id} itemName={li.item} />
                 )}
 
                 {(additionalSkusByItem.get(li.id) ?? []).map((row) => (

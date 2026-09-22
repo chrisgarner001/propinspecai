@@ -28,6 +28,9 @@ type Material = {
   source: string
   sku: string | null
   notes: string | null
+  purchase_count: number | null
+  price_min: string | null
+  price_max: string | null
 }
 
 type VendorEstimate = {
@@ -59,16 +62,36 @@ function SectionHeading({ title, description }: { title: string; description: st
 
 const mobileLabelClass = 'md:hidden text-[10px] font-semibold uppercase tracking-wide text-text-muted'
 
-export default async function CostBookPage() {
+export default async function CostBookPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>
+}) {
   await requireAdmin()
+  const { q } = await searchParams
   const sql = getSql()
   const gpmLabor = (await sql`
     select * from cost_book_gpm_labor order by task_name
   `) as unknown as GpmLaborRate[]
 
-  const materials = (await sql`
-    select * from cost_book_materials order by material_name
-  `) as unknown as Material[]
+  // Real Home Depot import data (docs/designs/propinspec-cost-history.md)
+  // is thousands of rows -- unsearched, cap to the most-recently-purchased
+  // 200 rather than building full pagination for this wedge; the search
+  // box finds anything else by name or SKU.
+  const materials = (
+    q?.trim()
+      ? await sql`
+          select * from cost_book_materials
+          where material_name ilike ${'%' + q.trim() + '%'} or sku ilike ${'%' + q.trim() + '%'}
+          order by last_purchased_date desc nulls last, material_name
+          limit 200
+        `
+      : await sql`
+          select * from cost_book_materials
+          order by last_purchased_date desc nulls last, material_name
+          limit 200
+        `
+  ) as unknown as Material[]
 
   const vendorEstimates = (await sql`
     select * from cost_book_vendor_estimates order by trade_category, task_name
@@ -140,8 +163,18 @@ export default async function CostBookPage() {
       <section className="border-t border-border">
         <SectionHeading
           title="Materials"
-          description="Most materials are purchased from Home Depot. Not yet seeded from receipts — add the last 6 months of purchases here (or provide the receipts and they can be imported in bulk)."
+          description="Real Home Depot purchase history (docs/designs/propinspec-cost-history.md) — price, purchase count, and range are computed from actual purchases, not editable directly. Non-Home-Depot materials can still be added by hand below."
         />
+        <form method="get" className="px-4 md:px-6 pb-3 flex items-center gap-2">
+          <input
+            type="search"
+            name="q"
+            defaultValue={q ?? ''}
+            placeholder="Search materials by name or SKU…"
+            className={`${inputClass} max-w-sm`}
+          />
+          <button type="submit" className={addButtonClass}>Search</button>
+        </form>
         <div role="table">
           <div role="row" className={`hidden md:grid ${materialCols} gap-2 px-4 md:px-6 py-2 border-y border-border`}>
             {['Material', 'Price', 'Unit', 'Source', 'SKU', 'Notes', ''].map((h) => (
@@ -152,7 +185,7 @@ export default async function CostBookPage() {
           </div>
           {materials.length === 0 && (
             <div className={emptyRowClass}>
-              No materials yet — this list starts empty until Home Depot receipts are imported.
+              {q ? `No materials match "${q}".` : 'No materials yet.'}
             </div>
           )}
           {materials.map((m) => (
@@ -163,7 +196,17 @@ export default async function CostBookPage() {
               className={`grid ${materialCols} gap-2 md:items-center px-4 md:px-6 py-3 md:py-2.5 border-b-2 md:border-b border-border`}
             >
               <input type="hidden" name="id" value={m.id} />
-              <div role="cell" className="font-medium">{m.material_name}</div>
+              <div role="cell" className="font-medium">
+                {m.material_name}
+                {m.purchase_count !== null && (
+                  <div className="text-[11px] text-text-muted font-normal">
+                    Purchased {m.purchase_count}×
+                    {m.price_min !== null && m.price_max !== null && m.price_min !== m.price_max
+                      ? ` · $${m.price_min}–$${m.price_max}`
+                      : ''}
+                  </div>
+                )}
+              </div>
               <div role="cell" className="space-y-1">
                 <div className={mobileLabelClass}>Price</div>
                 <input name="unit_price" type="number" step="0.01" defaultValue={m.unit_price} className={dataInputClass} />

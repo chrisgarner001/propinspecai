@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import { requireSessionOrThrow, requireAdminOrThrow } from '@/lib/dal'
+import { embedText, toVectorLiteral } from '@/lib/embeddings'
 
 function toNumberOrNull(value: FormDataEntryValue | null): number | null {
   if (value === null || value === '') return null
@@ -475,6 +476,61 @@ export async function linkLineItemToBulkMaterial(lineItemId: string, inspectionI
   await sql`
     update line_items
     set supplier = ${bm.supplier}, sku = ${bm.sku}, materials_cost = null
+    where id = ${lineItemId}
+  `
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
+}
+
+export type CostSuggestion = { sku: string; materialName: string; unitPrice: string; similarity: number }
+
+// Cost Book learning engine (docs/designs/propinspec-cost-history.md) --
+// on-demand, not computed automatically for every blank line item on page
+// load: an embedding call per lookup is cheap for one reviewer click, but
+// running it unprompted for every blank item on every Quote Sheet render
+// would add real, unnecessary latency/cost to a page that's already data-heavy.
+// Suggest-and-confirm only, same as bulk-item auto-fill -- this never writes
+// anything by itself, see applyHistoricalCostSuggestion below.
+export async function suggestHistoricalCost(itemName: string): Promise<{ suggestions: CostSuggestion[] }> {
+  await requireSessionOrThrow()
+  const trimmed = itemName.trim()
+  if (!trimmed) return { suggestions: [] }
+
+  const queryEmbedding = await embedText(trimmed, 'RETRIEVAL_QUERY')
+  if (!queryEmbedding) return { suggestions: [] }
+  const literal = toVectorLiteral(queryEmbedding)
+
+  const sql = getSql()
+  const rows = await sql`
+    select
+      sku, material_name, unit_price,
+      1 - (embedding <=> ${literal}::vector) as similarity
+    from cost_book_materials
+    where embedding is not null and sku is not null
+    order by embedding <=> ${literal}::vector
+    limit 3
+  `
+  return {
+    suggestions: rows
+      .filter((r) => Number(r.similarity) >= 0.75)
+      .map((r) => ({ sku: r.sku, materialName: r.material_name, unitPrice: r.unit_price, similarity: Number(r.similarity) })),
+  }
+}
+
+// Applies a suggestHistoricalCost() result the reviewer explicitly picked --
+// writes source/sku/materials_cost. Same "explicit reviewer choice can
+// overwrite" reasoning as linkLineItemToBulkMaterial above, but the UI only
+// ever offers this button when the line item's Supplier/SKU/cost are blank
+// (see the Quote Sheet render), so in practice it never overwrites real data.
+export async function applyHistoricalCostSuggestion(
+  lineItemId: string,
+  inspectionId: string,
+  sku: string,
+  unitPrice: string
+) {
+  await requireSessionOrThrow()
+  await getSql()`
+    update line_items
+    set supplier = 'Home Depot', sku = ${sku}, materials_cost = ${unitPrice}
     where id = ${lineItemId}
   `
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
