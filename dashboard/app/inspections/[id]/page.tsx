@@ -12,6 +12,7 @@ import RemoveSectionControl from '@/app/components/RemoveSectionControl'
 import SaveChangesButton from '@/app/components/SaveChangesButton'
 import VideoProcessingPanel from '@/app/components/VideoProcessingPanel'
 import CreateBatchesButton from '@/app/components/CreateBatchesButton'
+import InspectionQuickView from '@/app/components/InspectionQuickView'
 import type { InspectionVideoRow } from '@/app/actions'
 
 // Raised from the platform default for processNextInspectionVideo (called
@@ -133,6 +134,12 @@ export default async function InspectionPage({
     >
       <div className="flex items-center justify-between gap-2 px-4 md:px-6 py-3 border-b border-border bg-surface-alt flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
+          <InspectionQuickView
+            inspectionId={id}
+            propertyAddress={inspection.property_address}
+            label="View Inspection Report"
+            className={linkClass}
+          />
           {isMoveOut && (
             <>
               <a href={`/inspections/${id}/chargeback-review`} className={linkClass}>

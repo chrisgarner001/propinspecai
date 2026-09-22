@@ -15,9 +15,13 @@ import { useEffect, useState } from 'react'
 export default function InspectionQuickView({
   inspectionId,
   propertyAddress,
+  label = 'View Report',
+  className,
 }: {
   inspectionId: string
   propertyAddress: string
+  label?: string
+  className?: string
 }) {
   const [open, setOpen] = useState(false)
 
@@ -40,10 +44,13 @@ export default function InspectionQuickView({
           setOpen(true)
         }}
         aria-label={`View report for ${propertyAddress}`}
-        className="flex items-center gap-1.5 text-[13px] font-semibold text-accent hover:text-accent-hover border border-accent/40 hover:border-accent rounded-[var(--radius-sm)] px-3 py-1.5 shrink-0"
+        className={
+          className ??
+          'flex items-center gap-1.5 text-[13px] font-semibold text-accent hover:text-accent-hover border border-accent/40 hover:border-accent rounded-[var(--radius-sm)] px-3 py-1.5 shrink-0'
+        }
       >
-        <span className="text-[18px] leading-none">👁</span>
-        View Report
+        {!className && <span className="text-[18px] leading-none">👁</span>}
+        {label}
       </button>
 
       {open && (
