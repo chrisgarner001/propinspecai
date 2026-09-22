@@ -168,7 +168,7 @@ export default async function Dashboard() {
                     {new Date(i.inspection_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}
                   </div>
                 </Link>
-                <InspectionQuickView inspectionId={i.id} inspectionType={i.inspection_type} propertyAddress={i.property_address} />
+                <InspectionQuickView inspectionId={i.id} propertyAddress={i.property_address} />
                 <StatusBadge status={i.status} />
               </div>
             ))}

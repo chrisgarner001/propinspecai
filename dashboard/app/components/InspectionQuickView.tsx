@@ -2,20 +2,21 @@
 
 import { useEffect, useState } from 'react'
 
-// Dashboard's "Quick View" icon (2026-09-22 user request) -- embeds the
-// real generated Move-Out Report PDF in a popup instead of navigating away.
-// Only Move-Out inspections have a report to show (no report route exists
-// for any other type); other types get a graceful fallback instead of a
-// blank iframe. Requires the report route's Content-Disposition to be
-// `inline`, not `attachment` (see move-out-report/route.ts) -- otherwise
-// the browser would just try to download it inside the iframe.
+// Dashboard's "View Report" button (2026-09-22 user request; originally a
+// small eye icon embedding the tenant-facing Move-Out Report -- corrected
+// the same day: too small to notice, and the wrong report entirely. This
+// embeds the real generated Inspection Report instead -- full line-item
+// detail plus each item's still image, grouped by room/area, same as the
+// inspection detail page -- available for every inspection type, not just
+// Move-Out, since nothing in it is move-out-specific. Requires the report
+// route's Content-Disposition to be `inline`, not `attachment` (see
+// inspection-report/route.ts) -- otherwise the browser would just try to
+// download it inside the iframe.
 export default function InspectionQuickView({
   inspectionId,
-  inspectionType,
   propertyAddress,
 }: {
   inspectionId: string
-  inspectionType: string
   propertyAddress: string
 }) {
   const [open, setOpen] = useState(false)
@@ -38,11 +39,11 @@ export default function InspectionQuickView({
           e.stopPropagation()
           setOpen(true)
         }}
-        title="Quick View"
-        aria-label={`Quick view report for ${propertyAddress}`}
-        className="text-text-muted hover:text-accent shrink-0"
+        aria-label={`View report for ${propertyAddress}`}
+        className="flex items-center gap-1.5 text-[13px] font-semibold text-accent hover:text-accent-hover border border-accent/40 hover:border-accent rounded-[var(--radius-sm)] px-3 py-1.5 shrink-0"
       >
-        👁
+        <span className="text-[18px] leading-none">👁</span>
+        View Report
       </button>
 
       {open && (
@@ -58,7 +59,7 @@ export default function InspectionQuickView({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
-              <span className="text-[13px] font-semibold truncate">{propertyAddress} — Move-Out Report</span>
+              <span className="text-[13px] font-semibold truncate">{propertyAddress} — Inspection Report</span>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
@@ -68,23 +69,11 @@ export default function InspectionQuickView({
               </button>
             </div>
             <div className="flex-1 min-h-0">
-              {inspectionType === 'Move-Out' ? (
-                <iframe
-                  src={`/inspections/${inspectionId}/move-out-report`}
-                  title={`Move-Out Report — ${propertyAddress}`}
-                  className="w-full h-full border-0"
-                />
-              ) : (
-                <div className="p-6 text-[13px] text-text-muted">
-                  No report exists for {inspectionType} inspections yet — only Move-Out inspections generate one.{' '}
-                  <a
-                    href={`/inspections/${inspectionId}`}
-                    className="text-accent underline decoration-accent/40 hover:text-accent-hover"
-                  >
-                    Open the inspection →
-                  </a>
-                </div>
-              )}
+              <iframe
+                src={`/inspections/${inspectionId}/inspection-report`}
+                title={`Inspection Report — ${propertyAddress}`}
+                className="w-full h-full border-0"
+              />
             </div>
           </div>
         </div>
