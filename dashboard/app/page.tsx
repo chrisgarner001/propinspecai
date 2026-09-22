@@ -14,7 +14,7 @@ import InspectionQuickView from './components/InspectionQuickView'
 // the full Inspections list, and a 10-day calendar of inspection_date.
 export const dynamic = 'force-dynamic'
 
-type UpcomingRow = {
+type RecentRow = {
   id: string
   job_number: string
   property_address: string
@@ -22,6 +22,8 @@ type UpcomingRow = {
   status: string
   inspection_type: string
 }
+
+const RECENT_PAGE_SIZE = 5
 
 type CalendarRow = {
   id: string
@@ -52,26 +54,44 @@ function tenDayWindow(): Date[] {
   return Array.from({ length: 10 }, (_, i) => new Date(now.getTime() + i * DAY_MS))
 }
 
-export default async function Dashboard() {
+export default async function Dashboard({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>
+}) {
   await requireSession()
   const sql = getSql()
+
+  const { page: pageRaw } = await searchParams
+  const page = Math.max(1, Number(pageRaw) || 1)
 
   const counts = (await sql`
     select status, count(*)::int as count from inspections group by status
   `) as unknown as { status: string; count: number }[]
   const countByStatus = new Map(counts.map((c) => [c.status, c.count]))
 
-  // "Upcoming" here means the most recently active inspections still in
-  // motion -- there's no scheduled-future-date concept at the inspection
-  // level (only individual line items/stages have one), so this is
-  // "what needs attention soon," not a calendar of future dates.
-  const upcoming = (await sql`
+  // Inspections by Type -- every type in the catalog, not just the ones
+  // with inspections so far, same "show every bucket including zero" idea
+  // as Inspections by Stage above.
+  const typeCounts = (await sql`
+    select t.name, count(i.id)::int as count
+    from inspection_types t
+    left join inspections i on i.inspection_type = t.name
+    group by t.name
+    order by (t.name = 'Move-Out') desc, t.name
+  `) as unknown as { name: string; count: number }[]
+
+  // "Recent Inspections" -- most recently created, any status (a plain
+  // activity feed, not filtered to "still active" the way this section's
+  // old "Upcoming Inspections" framing was) -- paginated, 5 per page.
+  const [{ count: recentTotal }] = await sql`select count(*)::int from inspections`
+  const recent = (await sql`
     select id, job_number, property_address, inspection_date, status, inspection_type
     from inspections
-    where status != 'completed'
     order by created_at desc
-    limit 8
-  `) as unknown as UpcomingRow[]
+    limit ${RECENT_PAGE_SIZE} offset ${(page - 1) * RECENT_PAGE_SIZE}
+  `) as unknown as RecentRow[]
+  const recentTotalPages = Math.max(1, Math.ceil(recentTotal / RECENT_PAGE_SIZE))
 
   // 10-day calendar strip (2026-09-22 user request): today through the
   // next 9 days, bucketed by inspection_date. This is the only per-
@@ -142,18 +162,36 @@ export default async function Dashboard() {
         </div>
       </section>
 
+      <section className="border-b border-border">
+        <div className="px-4 md:px-6 pt-4 pb-2">
+          <h2 className="font-display font-bold text-[14px]">Inspections by Type</h2>
+        </div>
+        <div className="px-4 md:px-6 pb-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          {typeCounts.map((t) => (
+            <Link
+              key={t.name}
+              href={`/inspections?type=${encodeURIComponent(t.name)}`}
+              className="border border-border rounded-[var(--radius-md)] px-3 py-3 hover:border-accent hover:bg-surface-alt"
+            >
+              <div className="data-mono text-[22px] font-bold">{t.count}</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-text-muted mt-0.5">{t.name}</div>
+            </Link>
+          ))}
+        </div>
+      </section>
+
       <section>
         <div className="px-4 md:px-6 pt-4 pb-2 flex items-center justify-between">
-          <h2 className="font-display font-bold text-[14px]">Upcoming Inspections</h2>
+          <h2 className="font-display font-bold text-[14px]">Recent Inspections</h2>
           <Link href="/inspections" className="text-[12px] text-accent underline decoration-accent/40 hover:text-accent-hover">
             View all inspections →
           </Link>
         </div>
-        {upcoming.length === 0 ? (
-          <p className="px-4 md:px-6 pb-6 text-[13px] text-text-muted">Nothing in progress right now.</p>
+        {recent.length === 0 ? (
+          <p className="px-4 md:px-6 pb-6 text-[13px] text-text-muted">No inspections yet.</p>
         ) : (
           <div className="pb-2">
-            {upcoming.map((i) => (
+            {recent.map((i) => (
               <div
                 key={i.id}
                 className="flex items-center justify-between gap-3 px-4 md:px-6 py-2.5 border-b border-border hover:bg-surface-alt flex-wrap"
@@ -174,6 +212,31 @@ export default async function Dashboard() {
             ))}
           </div>
         )}
+        <div className="flex items-center justify-center gap-3 px-4 md:px-6 py-3">
+          {page > 1 ? (
+            <Link
+              href={`/?page=${page - 1}`}
+              className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
+            >
+              ← Prev
+            </Link>
+          ) : (
+            <span className="text-[12px] text-text-muted/50 px-3 py-1.5">← Prev</span>
+          )}
+          <span className="data-mono text-[12px] text-text-muted">
+            Page {page} of {recentTotalPages}
+          </span>
+          {page < recentTotalPages ? (
+            <Link
+              href={`/?page=${page + 1}`}
+              className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
+            >
+              Next →
+            </Link>
+          ) : (
+            <span className="text-[12px] text-text-muted/50 px-3 py-1.5">Next →</span>
+          )}
+        </div>
       </section>
 
       <section className="border-t border-border">

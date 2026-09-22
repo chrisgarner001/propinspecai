@@ -9,6 +9,7 @@ import BackButton from './BackButton'
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard' },
   { href: '/inspections', label: 'Inspections' },
+  { href: '/quotes', label: 'Quotes' },
   { href: '/properties', label: 'Properties' },
   { href: '/dispatch-board', label: 'Dispatch Board' },
   { href: '/cost-book', label: 'Cost Book' },

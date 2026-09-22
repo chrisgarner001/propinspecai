@@ -185,15 +185,25 @@ export default async function QuoteSheetPage({
   const totalMaterials =
     lineItems.reduce((sum, li) => sum + Number(li.materials_cost ?? 0), 0) +
     additionalSkus.reduce((sum, row) => sum + Number(row.materials_cost ?? 0), 0)
+  const totalVendorQuotes = lineItems.reduce(
+    (sum, li) => sum + (li.assigned_to === 'Outside Vendor' ? Number(li.vendor_estimated_cost ?? 0) : 0),
+    0
+  )
 
   return (
-    <AppShell active="/inspections" title={`Quote Sheet — ${inspection.property_address}`} wide>
+    <AppShell active="/inspections" title={`Build Quote — ${inspection.property_address}`} wide>
+      <div className="px-4 md:px-6 pt-3">
+        <a href={`/inspections/${id}`} className="text-[12px] text-accent underline decoration-accent/40 hover:text-accent-hover">
+          ← Back to Inspection
+        </a>
+      </div>
       <div className="flex items-center justify-between flex-wrap gap-2 px-4 py-3 md:px-4 md:px-6 border-b border-border bg-surface-alt">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="text-[13px] text-text-muted">
-            {inspection.property_address} · WO <span className="data-mono">{inspection.job_number}</span> ·{' '}
+            <span className="font-semibold text-text">Running Quote Totals:</span>{' '}
             <span className="data-mono">${totalMaterials.toFixed(2)}</span> materials total ·{' '}
-            <span className="data-mono">{totalHours.toFixed(2)}</span> labor hrs total
+            <span className="data-mono">{totalHours.toFixed(2)}</span> labor hrs total ·{' '}
+            <span className="data-mono">${totalVendorQuotes.toFixed(2)}</span> outside vendor quotes
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">Status</span>
@@ -201,12 +211,6 @@ export default async function QuoteSheetPage({
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <a
-            href={`/inspections/${id}`}
-            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
-          >
-            Back to Inspection
-          </a>
           {TIMELINE_VISIBLE_STATUSES.includes(inspection.status) && (
             <a
               href={`/dispatch-board?job=${id}`}
