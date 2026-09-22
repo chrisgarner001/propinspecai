@@ -127,7 +127,7 @@ export default async function DispatchBoardPage({
   const propertyRows: PropertyRow[] = inspections.map((i) => ({
     key: i.id,
     label: i.property_address,
-    sub: `Job ${i.job_number}`,
+    sub: `WO ${i.job_number}`,
   }))
 
   const crewRows: CrewRow[] = [

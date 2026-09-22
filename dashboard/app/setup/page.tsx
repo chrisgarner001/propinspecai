@@ -1,6 +1,14 @@
 import { getSql } from '@/lib/db'
 import { requireAdmin } from '@/lib/dal'
-import { updateSettings, createVendor, deleteVendor } from '@/app/actions'
+import {
+  updateSettings,
+  createVendor,
+  deleteVendor,
+  createInspectionType,
+  deleteInspectionType,
+  createInspector,
+  deleteInspector,
+} from '@/app/actions'
 import AppShell from '@/app/components/AppShell'
 import Link from 'next/link'
 import DeleteInspectionButton from '@/app/components/DeleteInspectionButton'
@@ -14,6 +22,8 @@ type Settings = {
 }
 
 type Vendor = { id: string; name: string; in_use: boolean }
+type InspectionType = { id: string; name: string; in_use: boolean }
+type Inspector = { id: string; name: string; in_use: boolean }
 
 const fieldClass = 'data-mono border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 w-40 bg-surface'
 const labelClass = 'font-medium'
@@ -31,6 +41,22 @@ export default async function SetupPage() {
     from vendors v
     order by v.name
   `) as unknown as Vendor[]
+  const inspectionTypes = (await sql`
+    select
+      t.id,
+      t.name,
+      exists(select 1 from inspections i where i.inspection_type = t.name) as in_use
+    from inspection_types t
+    order by (t.name = 'Move-Out') desc, t.name
+  `) as unknown as InspectionType[]
+  const inspectors = (await sql`
+    select
+      i.id,
+      i.name,
+      exists(select 1 from inspections ins where ins.inspector_name = i.name) as in_use
+    from inspectors i
+    order by i.name
+  `) as unknown as Inspector[]
 
   return (
     <AppShell active="/setup" title="Set Up">
@@ -132,6 +158,98 @@ export default async function SetupPage() {
             className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-2 text-[12px] font-semibold"
           >
             Create New Vendor
+          </button>
+        </form>
+      </div>
+
+      <div className="p-4 md:p-6 max-w-xl border-t border-border">
+        <div className={labelClass}>Inspection Types</div>
+        <div className={`${helpClass} mb-3`}>
+          Available on Add New Inspection. &quot;Move-Out&quot; can&apos;t be deleted — the Quote Sheet, Tenant
+          Chargeback Review, and Move-Out Report only ever show for that exact type.
+        </div>
+        {inspectionTypes.length > 0 && (
+          <ul className="mb-4 space-y-1">
+            {inspectionTypes.map((t) => (
+              <li key={t.id} className="flex items-center justify-between gap-2 text-[13px]">
+                <span className="text-text-muted">{t.name}</span>
+                {t.name === 'Move-Out' ? (
+                  <span className="text-[11px] text-text-muted italic">Required</span>
+                ) : t.in_use ? (
+                  <span className="text-[11px] text-text-muted italic" title="Used by at least one inspection">
+                    In use
+                  </span>
+                ) : (
+                  <DeleteInspectionButton
+                    action={deleteInspectionType.bind(null, t.id)}
+                    confirmMessage={`Delete inspection type "${t.name}"? This cannot be undone.`}
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        <form action={createInspectionType} className="flex items-end gap-2">
+          <div className="flex-1">
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1">
+              Type Name
+            </label>
+            <input
+              name="name"
+              required
+              placeholder="e.g. Condition Check"
+              className="border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 w-full bg-surface"
+            />
+          </div>
+          <button
+            type="submit"
+            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-2 text-[12px] font-semibold"
+          >
+            Add Type
+          </button>
+        </form>
+      </div>
+
+      <div className="p-4 md:p-6 max-w-xl border-t border-border">
+        <div className={labelClass}>Inspectors</div>
+        <div className={`${helpClass} mb-3`}>
+          Available in the Inspector dropdown on Add New Inspection — typing a new name there still works too.
+        </div>
+        {inspectors.length > 0 && (
+          <ul className="mb-4 space-y-1">
+            {inspectors.map((i) => (
+              <li key={i.id} className="flex items-center justify-between gap-2 text-[13px]">
+                <span className="text-text-muted">{i.name}</span>
+                {i.in_use ? (
+                  <span className="text-[11px] text-text-muted italic" title="Used by at least one inspection">
+                    In use
+                  </span>
+                ) : (
+                  <DeleteInspectionButton
+                    action={deleteInspector.bind(null, i.id)}
+                    confirmMessage={`Delete inspector "${i.name}"? This cannot be undone.`}
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        <form action={createInspector} className="flex items-end gap-2">
+          <div className="flex-1">
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1">
+              Inspector Name
+            </label>
+            <input
+              name="name"
+              required
+              className="border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 w-full bg-surface"
+            />
+          </div>
+          <button
+            type="submit"
+            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-2 text-[12px] font-semibold"
+          >
+            Add Inspector
           </button>
         </form>
       </div>

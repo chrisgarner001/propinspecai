@@ -43,7 +43,7 @@ export default async function InspectionStillsPage({ params }: { params: Promise
         backHref={`/inspections/${id}`}
         summary={
           <>
-            {inspection.property_address} · Job <span className="data-mono">{inspection.job_number}</span> ·{' '}
+            {inspection.property_address} · WO <span className="data-mono">{inspection.job_number}</span> ·{' '}
             <span className="data-mono">{stills.length}</span> still(s)
           </>
         }

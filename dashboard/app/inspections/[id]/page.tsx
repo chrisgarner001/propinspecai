@@ -117,7 +117,7 @@ export default async function InspectionPage({
               Property: {inspection.property_address}
             </h1>
             <div className="text-[13px] text-text-muted whitespace-nowrap">
-              Job <span className="data-mono">{inspection.job_number}</span>
+              WO <span className="data-mono">{inspection.job_number}</span>
             </div>
             <div className="text-[13px] text-text-muted whitespace-nowrap">Inspector: {inspection.inspector_name}</div>
             <div className="text-[13px] text-text-muted data-mono whitespace-nowrap">

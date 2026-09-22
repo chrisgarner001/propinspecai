@@ -839,6 +839,60 @@ export async function deleteProperty(propertyId: string, _formData: FormData) {
   revalidatePath('/properties')
 }
 
+// "Inspection Type" moved from a hardcoded 2-value CHECK constraint to a
+// real catalog (migration 0036) -- user request: "add Inspection Type to
+// Set up so new types can be added". Referenced by name via FK from
+// inspections.inspection_type.
+export async function createInspectionType(formData: FormData) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  const name = String(formData.get('name') ?? '').trim()
+  if (!name) return
+
+  await sql`insert into inspection_types (name) values (${name}) on conflict (name) do nothing`
+
+  revalidatePath('/setup')
+}
+
+// "Move-Out" is never deletable -- every non-Move-Out gating check across
+// the app (Quote Sheet/Tenant Chargeback Review visibility, the Move-Out
+// Report) is hardcoded against that exact name, not a flag on this table.
+// Deleting any other in-use type is blocked by the FK itself; swallow that
+// the same way deleteVendor does.
+export async function deleteInspectionType(typeId: string) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  const [type] = await sql`select name from inspection_types where id = ${typeId}`
+  if (!type || type.name === 'Move-Out') return
+  try {
+    await sql`delete from inspection_types where id = ${typeId}`
+  } catch (err) {
+    console.error('deleteInspectionType failed (likely still in use):', err)
+  }
+  revalidatePath('/setup')
+}
+
+// A convenience catalog for the Inspector dropdown on Add New Inspection --
+// inspections.inspector_name stays free text (not a foreign key), since the
+// user explicitly wants "a dropdown or fill in", not a hard-constrained list.
+export async function createInspector(formData: FormData) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  const name = String(formData.get('name') ?? '').trim()
+  if (!name) return
+
+  await sql`insert into inspectors (name) values (${name}) on conflict (name) do nothing`
+
+  revalidatePath('/setup')
+}
+
+export async function deleteInspector(inspectorId: string) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  await sql`delete from inspectors where id = ${inspectorId}`
+  revalidatePath('/setup')
+}
+
 export async function createVendor(formData: FormData) {
   await requireAdminOrThrow()
   const sql = getSql()

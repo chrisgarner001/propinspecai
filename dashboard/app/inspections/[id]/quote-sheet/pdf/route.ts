@@ -94,7 +94,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     .font('Helvetica')
     .fontSize(10)
     .text(
-      `Job ${inspection.job_number}  ·  Inspection Date: ${new Date(inspection.inspection_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}`,
+      `WO ${inspection.job_number}  ·  Inspection Date: ${new Date(inspection.inspection_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}`,
       PAGE_MARGIN,
       doc.y,
     )

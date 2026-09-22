@@ -48,7 +48,7 @@ function InspectionTable({ inspections }: { inspections: InspectionRow[] }) {
                     {i.inspection_type}
                   </span>
                 )}
-                <div className="data-mono text-[11px] text-text-muted">Job {i.job_number}</div>
+                <div className="data-mono text-[11px] text-text-muted">WO {i.job_number}</div>
               </td>
               <td className="px-6 py-3 whitespace-nowrap">{i.inspector_name}</td>
               <td className="px-6 py-3 data-mono text-text-muted">
@@ -81,7 +81,7 @@ function InspectionTable({ inspections }: { inspections: InspectionRow[] }) {
               </div>
               <StatusBadge status={i.status} />
             </div>
-            <div className="data-mono text-[11px] text-text-muted mt-0.5">Job {i.job_number}</div>
+            <div className="data-mono text-[11px] text-text-muted mt-0.5">WO {i.job_number}</div>
             <div className="flex items-center justify-between mt-1.5">
               <div className="text-[12px] text-text-muted">
                 {i.inspector_name} ·{' '}
@@ -113,8 +113,8 @@ export default async function InspectionsPage({
   // that stage here, instead of always showing every group.
   const status = statusRaw && STATUS_ORDER.includes(statusRaw) ? statusRaw : undefined
   const sql = getSql()
-  // Free-text address (and job number, for the times a reviewer knows the
-  // job # rather than the address) search -- the landing page had zero
+  // Free-text address (and work order number, for the times a reviewer
+  // knows the WO # rather than the address) search -- the landing page had zero
   // search/filter at all until this (2026-09-22 feedback), which was fine
   // with a handful of inspections but not once every property GPM has ever
   // turned goes through here, including multiple inspections per property
@@ -140,7 +140,7 @@ export default async function InspectionsPage({
             type="search"
             name="q"
             defaultValue={q ?? ''}
-            placeholder="Search by address or job #…"
+            placeholder="Search by property address or work order #…"
             className="border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 flex-1 min-w-[160px] bg-surface text-[13px]"
           />
           <select

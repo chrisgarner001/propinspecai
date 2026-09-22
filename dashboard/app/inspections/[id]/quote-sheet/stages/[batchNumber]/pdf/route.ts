@@ -151,7 +151,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     .font('Helvetica')
     .fontSize(10)
     .text(
-      `${inspection.property_address}  ·  Job ${inspection.job_number}  ·  Batch ${batchNumber}`,
+      `${inspection.property_address}  ·  WO ${inspection.job_number}  ·  Batch ${batchNumber}`,
       PAGE_MARGIN,
       doc.y,
     )

@@ -104,7 +104,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   doc.font('Helvetica-Bold').fontSize(16).text(`Materials Order List — ${inspection.property_address}`, PAGE_MARGIN, doc.y)
   doc.moveDown(0.3)
-  doc.font('Helvetica').fontSize(10).text(`Job ${inspection.job_number}`, PAGE_MARGIN, doc.y)
+  doc.font('Helvetica').fontSize(10).text(`WO ${inspection.job_number}`, PAGE_MARGIN, doc.y)
   doc.y += 16
 
   const colSku = PAGE_MARGIN

@@ -419,7 +419,7 @@ export default function DispatchBoard({
                       if (effEnd < 0 || effStart >= daysOut) return null // fully outside the visible window
                       const startCol = Math.max(2, effStart + 2)
                       const endCol = Math.min(daysOut + 2, effEnd + 3)
-                      const subtext = mode === 'property' ? item.crewLabel : `${item.propertyAddress} · Job ${item.jobNumber}`
+                      const subtext = mode === 'property' ? item.crewLabel : `${item.propertyAddress} · WO ${item.jobNumber}`
                       const isVendor = item.assignedTo === 'Outside Vendor'
                       return (
                         <div

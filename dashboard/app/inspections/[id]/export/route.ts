@@ -32,7 +32,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const sheet = workbook.addWorksheet('Rehab Quote')
 
   sheet.addRow(['Property', inspection.property_address])
-  sheet.addRow(['Job Number', inspection.job_number])
+  sheet.addRow(['Work Order Number', inspection.job_number])
   sheet.addRow(['Inspector', inspection.inspector_name])
   sheet.addRow([
     'Inspection Date',

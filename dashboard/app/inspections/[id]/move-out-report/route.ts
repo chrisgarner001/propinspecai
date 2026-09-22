@@ -337,7 +337,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${filename}"`,
+      // inline, not attachment -- the browser renders it directly instead of
+      // force-downloading, which both the existing "Review Move-Out Report"
+      // link (opened in a new tab) and the Dashboard's new Quick View
+      // (embedded in an <iframe> popup) depend on to actually show the PDF.
+      // A reader can still save it from their PDF viewer's own toolbar.
+      'Content-Disposition': `inline; filename="${filename}"`,
     },
   })
 }

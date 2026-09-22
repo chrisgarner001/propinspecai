@@ -191,7 +191,7 @@ export default async function QuoteSheetPage({
       <div className="flex items-center justify-between flex-wrap gap-2 px-4 py-3 md:px-4 md:px-6 border-b border-border bg-surface-alt">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="text-[13px] text-text-muted">
-            {inspection.property_address} · Job <span className="data-mono">{inspection.job_number}</span> ·{' '}
+            {inspection.property_address} · WO <span className="data-mono">{inspection.job_number}</span> ·{' '}
             <span className="data-mono">${totalMaterials.toFixed(2)}</span> materials total ·{' '}
             <span className="data-mono">{totalHours.toFixed(2)}</span> labor hrs total
           </div>
