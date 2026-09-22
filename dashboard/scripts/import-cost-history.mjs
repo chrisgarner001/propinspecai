@@ -139,7 +139,10 @@ try {
       min(net_unit_price) as price_min,
       max(net_unit_price) as price_max,
       (array_agg(net_unit_price order by purchase_date desc))[1] as unit_price,
-      max(purchase_date) as last_purchased_date
+      max(purchase_date) as last_purchased_date,
+      (array_agg(department_name order by purchase_date desc))[1] as department_name,
+      (array_agg(class_name order by purchase_date desc))[1] as class_name,
+      (array_agg(subclass_name order by purchase_date desc))[1] as subclass_name
     from home_depot_purchase_history
     where net_unit_price >= 0
     group by sku_number
@@ -162,8 +165,8 @@ try {
 
     if (embeddingLiteral) {
       await sql`
-        insert into cost_book_materials (material_name, unit_price, source, sku, last_purchased_date, purchase_count, price_min, price_max, embedding)
-        values (${agg.sku_description}, ${agg.unit_price}, 'Home Depot', ${agg.sku_number}, ${agg.last_purchased_date}, ${agg.purchase_count}, ${agg.price_min}, ${agg.price_max}, ${embeddingLiteral})
+        insert into cost_book_materials (material_name, unit_price, source, sku, last_purchased_date, purchase_count, price_min, price_max, department_name, class_name, subclass_name, embedding)
+        values (${agg.sku_description}, ${agg.unit_price}, 'Home Depot', ${agg.sku_number}, ${agg.last_purchased_date}, ${agg.purchase_count}, ${agg.price_min}, ${agg.price_max}, ${agg.department_name}, ${agg.class_name}, ${agg.subclass_name}, ${embeddingLiteral})
         on conflict (sku) do update set
           material_name = excluded.material_name,
           unit_price = excluded.unit_price,
@@ -171,19 +174,25 @@ try {
           purchase_count = excluded.purchase_count,
           price_min = excluded.price_min,
           price_max = excluded.price_max,
+          department_name = excluded.department_name,
+          class_name = excluded.class_name,
+          subclass_name = excluded.subclass_name,
           embedding = excluded.embedding
       `
     } else {
       await sql`
-        insert into cost_book_materials (material_name, unit_price, source, sku, last_purchased_date, purchase_count, price_min, price_max)
-        values (${agg.sku_description}, ${agg.unit_price}, 'Home Depot', ${agg.sku_number}, ${agg.last_purchased_date}, ${agg.purchase_count}, ${agg.price_min}, ${agg.price_max})
+        insert into cost_book_materials (material_name, unit_price, source, sku, last_purchased_date, purchase_count, price_min, price_max, department_name, class_name, subclass_name)
+        values (${agg.sku_description}, ${agg.unit_price}, 'Home Depot', ${agg.sku_number}, ${agg.last_purchased_date}, ${agg.purchase_count}, ${agg.price_min}, ${agg.price_max}, ${agg.department_name}, ${agg.class_name}, ${agg.subclass_name})
         on conflict (sku) do update set
           material_name = excluded.material_name,
           unit_price = excluded.unit_price,
           last_purchased_date = excluded.last_purchased_date,
           purchase_count = excluded.purchase_count,
           price_min = excluded.price_min,
-          price_max = excluded.price_max
+          price_max = excluded.price_max,
+          department_name = excluded.department_name,
+          class_name = excluded.class_name,
+          subclass_name = excluded.subclass_name
       `
     }
     processed++
