@@ -59,6 +59,25 @@ export default async function NewInspectionPage() {
           <div className={helpClass}>Optional context for whoever reviews this inspection. Type it or use the mic.</div>
         </div>
 
+        <div className="pt-2 border-t border-border" />
+
+        <div>
+          <label className={labelClass}>Lease name</label>
+          <input name="lease_name" className={inputClass} />
+          <div className={helpClass}>Optional. Merged into the Move-Out Report as an exhibit. Can be filled in later.</div>
+        </div>
+        <div>
+          <label className={labelClass}>Security deposit</label>
+          <input
+            name="security_deposit_amount"
+            type="number"
+            step="0.01"
+            placeholder="0.00"
+            className={`${inputClass} data-mono`}
+          />
+          <div className={helpClass}>Optional. Also merged into the Move-Out Report. Can be filled in later.</div>
+        </div>
+
         <button
           type="submit"
           className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-4 py-2 text-[13px] font-semibold"

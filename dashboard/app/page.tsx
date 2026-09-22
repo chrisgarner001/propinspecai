@@ -85,25 +85,72 @@ function InspectionTable({ inspections }: { inspections: InspectionRow[] }) {
   )
 }
 
-export default async function Home() {
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>
+}) {
   await requireSession()
+  const { q: qRaw } = await searchParams
+  const q = qRaw?.trim() || undefined
   const sql = getSql()
-  const inspections = (await sql`
-    select id, job_number, property_address, inspection_date, inspector_name, status
-    from inspections
-    order by created_at desc
-  `) as unknown as InspectionRow[]
+  // Free-text address (and job number, for the times a reviewer knows the
+  // job # rather than the address) search -- the landing page had zero
+  // search/filter at all until this (2026-09-22 feedback), which was fine
+  // with a handful of inspections but not once every property GPM has ever
+  // turned goes through here, including multiple inspections per property
+  // over time.
+  const inspections = (
+    q
+      ? await sql`
+          select id, job_number, property_address, inspection_date, inspector_name, status
+          from inspections
+          where property_address ilike ${'%' + q + '%'} or job_number ilike ${'%' + q + '%'}
+          order by created_at desc
+        `
+      : await sql`
+          select id, job_number, property_address, inspection_date, inspector_name, status
+          from inspections
+          order by created_at desc
+        `
+  ) as unknown as InspectionRow[]
 
   return (
     <AppShell active="/" title="Move-out inspections">
-      <div className="flex justify-end px-4 md:px-6 py-4 border-b border-border">
+      <div className="flex items-center justify-between gap-2 px-4 md:px-6 py-4 border-b border-border flex-wrap">
+        <form method="get" className="flex items-center gap-2 flex-1 min-w-[200px] max-w-sm">
+          <input
+            type="search"
+            name="q"
+            defaultValue={q ?? ''}
+            placeholder="Search by address or job #…"
+            className="border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 w-full bg-surface text-[13px]"
+          />
+          <button
+            type="submit"
+            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap"
+          >
+            Search
+          </button>
+          {q && (
+            <Link href="/" className="text-[12px] text-accent underline decoration-accent/40 whitespace-nowrap">
+              Clear
+            </Link>
+          )}
+        </form>
         <Link
           href="/inspections/new"
-          className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-3.5 py-2 text-[13px] font-semibold"
+          className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-3.5 py-2 text-[13px] font-semibold whitespace-nowrap"
         >
           + Add New Inspection
         </Link>
       </div>
+
+      {q && (
+        <div className="px-4 md:px-6 py-2 border-b border-border bg-surface-alt text-[12px] text-text-muted">
+          {inspections.length} result{inspections.length === 1 ? '' : 's'} for &quot;{q}&quot;
+        </div>
+      )}
 
       {STATUS_GROUPS.map((group) => {
         const rows = inspections.filter((i) => i.status === group.status)

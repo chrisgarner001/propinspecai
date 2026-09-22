@@ -26,6 +26,7 @@ type LineItem = {
   recommended_action: string | null
   tenant_charge: boolean
   tenant_charge_amount: string | null
+  tenant_charge_description: string | null
 }
 
 const CONDITION_DISPLAY: Record<string, string> = {
@@ -53,7 +54,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const lineItems = (await sql`
     select room_area, item, condition, observed_evidence, recommended_action,
-      tenant_charge, tenant_charge_amount
+      tenant_charge, tenant_charge_amount, tenant_charge_description
     from line_items
     where inspection_id = ${id}
     order by room_area, created_at
@@ -120,7 +121,27 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   doc.font('Helvetica-Bold').text('Inspection Type:', 330, row2)
   doc.font('Helvetica-Bold').fontSize(12).text('Move-Out', 330 + 100, row2 - 1)
 
-  doc.y = row2 + 30
+  // Lease Name / Security Deposit -- manually entered on the inspection
+  // detail page, no PMS integration exists to pull them from (2026-09-22
+  // feedback: wanted merged in as a report exhibit, same as zinspector).
+  // Same "blank line to fill in by hand" fallback as Tenant Names above
+  // when not yet entered, rather than omitting the field or fabricating a
+  // value.
+  const row3 = row2 + 26
+  doc.font('Helvetica-Bold').fontSize(10).text('Lease Name:', PAGE_MARGIN, row3)
+  if (inspection.lease_name) {
+    doc.font('Helvetica').text(inspection.lease_name, PAGE_MARGIN + 105, row3, { width: 200 })
+  } else {
+    doc.moveTo(PAGE_MARGIN + 105, row3 + 10).lineTo(330 - 10, row3 + 10).stroke()
+  }
+  doc.font('Helvetica-Bold').text('Security Deposit:', 330, row3)
+  if (inspection.security_deposit_amount !== null) {
+    doc.font('Helvetica').text(`$${Number(inspection.security_deposit_amount).toFixed(2)}`, 330 + 100, row3)
+  } else {
+    doc.moveTo(330 + 100, row3 + 10).lineTo(PAGE_WIDTH - PAGE_MARGIN, row3 + 10).stroke()
+  }
+
+  doc.y = row3 + 30
   doc.font('Helvetica-BoldOblique').fontSize(9)
   doc
     .rect(PAGE_MARGIN, doc.y, PAGE_WIDTH - PAGE_MARGIN * 2, 40)
@@ -161,27 +182,28 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     doc.y += 4
   }
 
-  // Diagonal, semi-transparent stamp over any row the reviewer marked
-  // "Tenant Charge" -- makes charged items visually obvious when skimming
-  // the full checklist, not just in the separate itemized-charges section.
-  function drawTenantChargeWatermark(rowY: number, rowHeight: number) {
-    const centerX = (colItem + PAGE_WIDTH - PAGE_MARGIN) / 2
-    const centerY = rowY + rowHeight / 2
-    doc.save()
-    doc.opacity(0.25)
-    doc.rotate(-12, { origin: [centerX, centerY] })
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(13)
-      .fillColor('#c0392b')
-      .text('TENANT CHARGE', centerX - 90, centerY - 7, { width: 180, align: 'center' })
-    doc.restore()
-  }
-
+  // A charged row shows the dollar amount right inline with its own
+  // comment, instead of the old red diagonal "TENANT CHARGE" watermark
+  // (2026-09-22 feedback: GPM prints in black & white, so the red never
+  // showed at all, and pulling the amount into a separate table at the end
+  // of the document disconnected it from the comment that explains it --
+  // the actual audience here, a tenant or a judge deciding whether to
+  // fight the charge, needs both together). tenant_charge_description
+  // (independently editable on Tenant Chargeback Review) replaces the
+  // standard comment for this row when set, since it's specifically
+  // written for this context -- falls back to the standard
+  // observed_evidence/recommended_action text when not.
   function drawItemRow(li: LineItem) {
-    const comments = [li.observed_evidence, li.recommended_action].filter(Boolean).join(' — ')
+    const comments = li.tenant_charge_description?.trim()
+      ? li.tenant_charge_description
+      : [li.observed_evidence, li.recommended_action].filter(Boolean).join(' — ')
+    const chargeLine = li.tenant_charge
+      ? `Tenant Charge: ${li.tenant_charge_amount !== null ? `$${Number(li.tenant_charge_amount).toFixed(2)}` : 'Not yet entered'}`
+      : null
+
     const commentsHeight = doc.heightOfString(comments || '', { width: colWidth })
-    const rowHeight = Math.max(14, commentsHeight)
+    const chargeLineHeight = chargeLine ? doc.heightOfString(chargeLine, { width: colWidth }) + 2 : 0
+    const rowHeight = Math.max(14, commentsHeight + chargeLineHeight)
     ensureSpace(rowHeight + 6)
 
     const rowY = doc.y
@@ -189,7 +211,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     doc.text(li.item, colItem, rowY, { width: colStatus - colItem - 6 })
     doc.text(CONDITION_DISPLAY[li.condition] ?? li.condition, colStatus, rowY)
     doc.text(comments, colComments, rowY, { width: colWidth })
-    if (li.tenant_charge) drawTenantChargeWatermark(rowY, rowHeight)
+    if (chargeLine) {
+      doc.font('Helvetica-Bold').fontSize(9)
+      doc.text(chargeLine, colComments, rowY + commentsHeight + 2, { width: colWidth })
+      doc.font('Helvetica').fontSize(9)
+    }
     doc.y = rowY + rowHeight + 6
     doc
       .moveTo(PAGE_MARGIN, doc.y - 3)

@@ -25,6 +25,7 @@ type LineItem = {
   recommended_action: string | null
   tenant_charge: boolean
   tenant_charge_amount: string | null
+  tenant_charge_description: string | null
 }
 
 export default async function ChargebackReviewPage({ params }: { params: Promise<{ id: string }> }) {
@@ -36,7 +37,8 @@ export default async function ChargebackReviewPage({ params }: { params: Promise
   if (!inspection) notFound()
 
   const lineItems = (await sql`
-    select id, room_area, item, condition, observed_evidence, recommended_action, tenant_charge, tenant_charge_amount
+    select id, room_area, item, condition, observed_evidence, recommended_action,
+      tenant_charge, tenant_charge_amount, tenant_charge_description
     from line_items
     where inspection_id = ${id}
     order by room_area, created_at
@@ -58,6 +60,12 @@ export default async function ChargebackReviewPage({ params }: { params: Promise
           {inspection.property_address} · Job <span className="data-mono">{inspection.job_number}</span>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <a
+            href={`/inspections/${id}`}
+            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3.5 py-2 text-[13px] font-semibold"
+          >
+            Back to Inspection
+          </a>
           <a
             href={`/inspections/${id}/move-out-report`}
             target="_blank"
@@ -108,7 +116,13 @@ export default async function ChargebackReviewPage({ params }: { params: Promise
                     </div>
                   )}
                 </div>
-                <TenantChargeInput id={li.id} tenantCharge={li.tenant_charge} tenantChargeAmount={li.tenant_charge_amount} />
+                <TenantChargeInput
+                  id={li.id}
+                  tenantCharge={li.tenant_charge}
+                  tenantChargeAmount={li.tenant_charge_amount}
+                  tenantChargeDescription={li.tenant_charge_description}
+                  defaultDescription={[li.observed_evidence, li.recommended_action].filter(Boolean).join(' — ') || li.item}
+                />
               </div>
             ))}
           </div>

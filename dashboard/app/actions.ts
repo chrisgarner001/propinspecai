@@ -30,6 +30,14 @@ function toNumberOrNull(value: FormDataEntryValue | null): number | null {
 // inputs gone but the columns still being written, every save from this page
 // would have silently wiped assigned_to/materials_cost/labor_hours/
 // labor_cost/vendor_estimated_cost/vendor_id to null on every line item.
+//
+// "Remove from Quote Sheet" (tenant_approved) moved OFF this page and onto
+// the Quote Sheet itself (2026-09-22 feedback: it's a Quote Sheet concept,
+// doesn't belong at the initial-review stage) -- this action no longer
+// touches that column at all, so whatever the Quote Sheet last set stays
+// untouched by a save here. "Tenant Chargeback" (tenant_charge) replaces it
+// in this page's own table instead, letting the reviewer flag a chargeback
+// candidate during the very first pass instead of only in Chargeback Review.
 export async function bulkUpdateLineItems(formData: FormData) {
   await requireSessionOrThrow()
   const sql = getSql()
@@ -48,7 +56,7 @@ export async function bulkUpdateLineItems(formData: FormData) {
     const recommendedAction = String(formData.get(`recommended_action__${id}`) ?? '')
     const observedEvidenceRaw = formData.get(`observed_evidence__${id}`)
     const observedEvidence = observedEvidenceRaw ? String(observedEvidenceRaw) : null
-    const tenantApproved = formData.get(`tenant_approved__${id}`) !== null
+    const tenantCharge = formData.get(`tenant_charge__${id}`) !== null
 
     await sql`
       update line_items
@@ -58,7 +66,7 @@ export async function bulkUpdateLineItems(formData: FormData) {
         condition = ${condition},
         recommended_action = ${recommendedAction},
         observed_evidence = ${observedEvidence},
-        tenant_approved = ${tenantApproved}
+        tenant_charge = ${tenantCharge}
       where id = ${id}
     `
   }
@@ -67,11 +75,23 @@ export async function bulkUpdateLineItems(formData: FormData) {
 }
 
 // Saves the standalone Tenant Chargeback Review screen
-// (app/inspections/[id]/chargeback-review) -- touches ONLY tenant_charge and
-// tenant_charge_amount, unlike bulkUpdateLineItems above, so a senior PM can
-// make the tenant-charge call fast against the 30-day security-deposit
-// disposition deadline without wading through (or accidentally clobbering)
-// the AI-extraction/Quote-Sheet fields this page doesn't even show.
+// (app/inspections/[id]/chargeback-review) -- touches ONLY tenant_charge,
+// tenant_charge_amount, and tenant_charge_description, unlike
+// bulkUpdateLineItems above, so a senior PM can make the tenant-charge call
+// fast against the 30-day security-deposit disposition deadline without
+// wading through (or accidentally clobbering) the AI-extraction/Quote-Sheet
+// fields this page doesn't even show.
+//
+// tenant_charge_description (2026-09-22 feedback) is a genuinely separate
+// piece of text from item/observed_evidence/recommended_action -- the
+// Quote Sheet needs "paint bedroom", the tenant charge needs "paint
+// bedroom -- tenant painted without permission, coverage poor, requires
+// wall prep/primer/two coats." Only submitted (and only rendered as an
+// input) while its row's own "Tenant Charge" checkbox is checked
+// (TenantChargeInput), so unchecking a chargeback also clears its
+// description, matching tenant_charge_amount's existing clear-on-uncheck
+// behavior -- a stale chargeback description for an item that's no longer
+// being charged has no legitimate use.
 export async function updateChargebackReview(formData: FormData) {
   await requireSessionOrThrow()
   const sql = getSql()
@@ -81,10 +101,12 @@ export async function updateChargebackReview(formData: FormData) {
   for (const id of ids) {
     const tenantCharge = formData.get(`tenant_charge__${id}`) !== null
     const tenantChargeAmount = toNumberOrNull(formData.get(`tenant_charge_amount__${id}`))
+    const tenantChargeDescriptionRaw = formData.get(`tenant_charge_description__${id}`)
+    const tenantChargeDescription = tenantChargeDescriptionRaw ? String(tenantChargeDescriptionRaw).trim() || null : null
 
     await sql`
       update line_items
-      set tenant_charge = ${tenantCharge}, tenant_charge_amount = ${tenantChargeAmount}
+      set tenant_charge = ${tenantCharge}, tenant_charge_amount = ${tenantChargeAmount}, tenant_charge_description = ${tenantChargeDescription}
       where id = ${id}
     `
   }
@@ -124,6 +146,14 @@ export async function postMoveOutReport(inspectionId: string, formData: FormData
 // timestamp mapping and the room quick-jump anchors on the main inspection
 // page); this page's whole purpose is polishing the item text before it goes
 // to the owner, so those two fields ARE editable here.
+//
+// "Remove from Quote Sheet" (tenant_approved) now lives exclusively on this
+// page (2026-09-22 feedback) -- it used to be a checkbox on the inspection
+// detail page, which doesn't affect anything a reviewer can see from there.
+// This page's own line-item query already filters tenant_approved = false,
+// so checking the box and saving makes the row disappear from this exact
+// list on the next load -- the control and its visible effect are finally
+// on the same screen.
 export async function updateQuoteSheetItems(formData: FormData) {
   await requireSessionOrThrow()
   const sql = getSql()
@@ -160,6 +190,7 @@ export async function updateQuoteSheetItems(formData: FormData) {
     const sku = skuRaw ? String(skuRaw) : null
     const skuQuantityRaw = formData.get(`sku_quantity__${id}`)
     const skuQuantity = skuQuantityRaw ? String(skuQuantityRaw) : null
+    const tenantApproved = formData.get(`tenant_approved__${id}`) !== null
 
     await sql`
       update line_items
@@ -177,12 +208,21 @@ export async function updateQuoteSheetItems(formData: FormData) {
         stage_id = ${stageId},
         supplier = ${supplier},
         sku = ${sku},
-        sku_quantity = ${skuQuantity}
+        sku_quantity = ${skuQuantity},
+        tenant_approved = ${tenantApproved}
       where id = ${id}
     `
   }
 
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
+}
+
+export type CreateBatchesResult = {
+  batchesCreated: number
+  skippedNoStage: number
+  skippedNoVendor: number
+  skippedOtherAssignment: number
+  skippedUnassigned: number
 }
 
 // Auto-fills batch_number for whichever staged line items don't have one
@@ -199,45 +239,73 @@ export async function updateQuoteSheetItems(formData: FormData) {
 // reviewer can still freely reassign/split items on the Quote Sheet by
 // clearing batch_number directly in the DB if needed; re-running this
 // button must not clobber existing batches.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, inspectionId) call site; formAction always passes the triggering form's FormData last
-export async function createBatches(inspectionId: string, _formData: FormData) {
+//
+// Returns real counts instead of just revalidating and returning nothing
+// (2026-09-22 feedback: a real bug report -- "Create Stages" appeared to do
+// nothing on an inspection where every remaining item was missing a Stage
+// or a vendor, which is indistinguishable from broken with zero feedback).
+// Called directly from a client component (CreateBatchesButton) via
+// useTransition, not a plain form action, specifically so that result can
+// be shown.
+export async function createBatches(inspectionId: string): Promise<CreateBatchesResult> {
   await requireSessionOrThrow()
   const sql = getSql()
 
   const items = await sql`
     select id, stage_id, assigned_to, vendor_id from line_items
-    where inspection_id = ${inspectionId} and tenant_approved = false and batch_number is null and stage_id is not null
+    where inspection_id = ${inspectionId} and tenant_approved = false and batch_number is null
   `
-  if (items.length > 0) {
-    const [{ max }] = await sql`select max(batch_number) as max from line_items where inspection_id = ${inspectionId}`
-    let nextBatch = (max ?? 0) + 1
 
-    const gpmGroups = new Map<string, string[]>()
-    const vendorGroups = new Map<string, string[]>()
+  const gpmGroups = new Map<string, string[]>()
+  const vendorGroups = new Map<string, string[]>()
+  let skippedNoStage = 0
+  let skippedNoVendor = 0
+  let skippedOtherAssignment = 0
+  let skippedUnassigned = 0
 
-    for (const li of items) {
-      if (li.assigned_to === 'GPM Staff') {
-        if (!gpmGroups.has(li.stage_id)) gpmGroups.set(li.stage_id, [])
-        gpmGroups.get(li.stage_id)!.push(li.id)
-      } else if (li.assigned_to === 'Outside Vendor' && li.vendor_id !== null) {
+  for (const li of items) {
+    if (li.stage_id === null) {
+      skippedNoStage++
+    } else if (li.assigned_to === 'GPM Staff') {
+      if (!gpmGroups.has(li.stage_id)) gpmGroups.set(li.stage_id, [])
+      gpmGroups.get(li.stage_id)!.push(li.id)
+    } else if (li.assigned_to === 'Outside Vendor') {
+      if (li.vendor_id !== null) {
         const key = `${li.stage_id}:${li.vendor_id}`
         if (!vendorGroups.has(key)) vendorGroups.set(key, [])
         vendorGroups.get(key)!.push(li.id)
+      } else {
+        skippedNoVendor++
       }
+    } else if (li.assigned_to === 'Other') {
+      skippedOtherAssignment++
+    } else {
+      skippedUnassigned++
     }
+  }
+
+  let batchesCreated = 0
+  if (gpmGroups.size > 0 || vendorGroups.size > 0) {
+    const [{ max }] = await sql`select max(batch_number) as max from line_items where inspection_id = ${inspectionId}`
+    let nextBatch = (max ?? 0) + 1
 
     for (const ids of gpmGroups.values()) {
       await sql`update line_items set batch_number = ${nextBatch} where id in ${sql(ids)}`
       nextBatch++
+      batchesCreated++
     }
     for (const ids of vendorGroups.values()) {
       await sql`update line_items set batch_number = ${nextBatch} where id in ${sql(ids)}`
       nextBatch++
+      batchesCreated++
     }
   }
 
+  revalidatePath(`/inspections/${inspectionId}`)
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
   revalidatePath(`/inspections/${inspectionId}/quote-sheet/stages`)
+
+  return { batchesCreated, skippedNoStage, skippedNoVendor, skippedOtherAssignment, skippedUnassigned }
 }
 
 // STAND-IN for the real PropertyWare integration -- there's no PW API
@@ -661,21 +729,46 @@ export async function createInspection(formData: FormData) {
   const sourceVideoDriveFolderUrl = String(formData.get('source_video_drive_folder_url') || '') || null
   const specialInstructions = String(formData.get('special_instructions') || '') || null
   const moveInReportDriveUrl = String(formData.get('move_in_report_drive_url') || '') || null
+  const leaseName = String(formData.get('lease_name') || '') || null
+  const securityDepositAmount = toNumberOrNull(formData.get('security_deposit_amount'))
 
   const [row] = await sql`
     insert into inspections (
       job_number, property_address, inspection_date, inspector_name,
-      source_video_drive_folder_url, special_instructions, move_in_report_drive_url
+      source_video_drive_folder_url, special_instructions, move_in_report_drive_url,
+      lease_name, security_deposit_amount
     )
     values (
       ${jobNumber}, ${propertyAddress}, ${inspectionDate}, ${inspectorName},
-      ${sourceVideoDriveFolderUrl}, ${specialInstructions}, ${moveInReportDriveUrl}
+      ${sourceVideoDriveFolderUrl}, ${specialInstructions}, ${moveInReportDriveUrl},
+      ${leaseName}, ${securityDepositAmount}
     )
     returning id
   `
 
   revalidatePath('/')
   redirect(`/inspections/${row.id}`)
+}
+
+// Both fields are optional and manually entered -- no PMS integration exists
+// to pull them from (2026-09-22 feedback: wanted as a merged exhibit on the
+// Move-Out Report, same as zinspector does, but GPM has no source system
+// connected here yet). Editable after creation too, in case they weren't
+// known yet when the inspection was first logged.
+export async function updateInspectionBilling(inspectionId: string, formData: FormData) {
+  await requireSessionOrThrow()
+  const sql = getSql()
+  const leaseName = String(formData.get('lease_name') || '') || null
+  const securityDepositAmount = toNumberOrNull(formData.get('security_deposit_amount'))
+
+  await sql`
+    update inspections
+    set lease_name = ${leaseName}, security_deposit_amount = ${securityDepositAmount}
+    where id = ${inspectionId}
+  `
+
+  revalidatePath(`/inspections/${inspectionId}`)
+  revalidatePath(`/inspections/${inspectionId}/move-out-report`)
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, id) call site; formAction always passes the triggering form's FormData last

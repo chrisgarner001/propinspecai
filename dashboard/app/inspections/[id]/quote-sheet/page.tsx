@@ -3,7 +3,6 @@ import { requireSession } from '@/lib/dal'
 import { notFound } from 'next/navigation'
 import {
   updateQuoteSheetItems,
-  createBatches,
   duplicateLineItem,
   removeLineItemSku,
   addBulkMaterial,
@@ -22,6 +21,7 @@ import LineItemMaterialsCost from '@/app/components/LineItemMaterialsCost'
 import RemoveSectionControl from '@/app/components/RemoveSectionControl'
 import SaveChangesButton from '@/app/components/SaveChangesButton'
 import StatusSelect from '@/app/components/StatusSelect'
+import CreateBatchesButton from '@/app/components/CreateBatchesButton'
 
 // Options for this page's status pill -- a strict subset of the full
 // inspections.status enum (see StatusBadge.tsx's STATUS_ORDER). "Under
@@ -215,14 +215,7 @@ export default async function QuoteSheetPage({
               Dispatch Board
             </a>
           )}
-          <form action={createBatches.bind(null, id)}>
-            <button
-              type="submit"
-              className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
-            >
-              Create Stages
-            </button>
-          </form>
+          <CreateBatchesButton inspectionId={id} label="Create Stages" />
           <a
             href={`/inspections/${id}/quote-sheet/stages`}
             className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
@@ -534,6 +527,21 @@ export default async function QuoteSheetPage({
                       )
                   ).toFixed(2)}
                 </span>
+                {/* Moved here from the inspection detail page (2026-09-22
+                    feedback) -- that page had no way to see the effect of
+                    checking it, since this page's own query already
+                    excludes tenant_approved = true items. Plain checkbox,
+                    not a client component: it's just one more field in this
+                    row's own bulk-save form, same as every input above. */}
+                <label className="flex items-center gap-1.5 text-[11px] text-text-muted cursor-pointer whitespace-nowrap">
+                  <input
+                    type="checkbox"
+                    name={`tenant_approved__${li.id}`}
+                    defaultChecked={false}
+                    className="h-3.5 w-3.5 cursor-pointer accent-error"
+                  />
+                  Remove from Quote Sheet
+                </label>
                 <RemoveSectionControl id={li.id} />
                 <button
                   type="submit"

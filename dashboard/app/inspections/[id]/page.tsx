@@ -1,6 +1,6 @@
 import { getSql } from '@/lib/db'
 import { requireSession } from '@/lib/dal'
-import { bulkUpdateLineItems, addLineItem, duplicateLineItem, deleteInspection, createBatches } from '@/app/actions'
+import { bulkUpdateLineItems, addLineItem, duplicateLineItem, deleteInspection, updateInspectionBilling } from '@/app/actions'
 import { notFound } from 'next/navigation'
 import AppShell from '@/app/components/AppShell'
 import StatusSelect from '@/app/components/StatusSelect'
@@ -11,6 +11,7 @@ import DeleteInspectionButton from '@/app/components/DeleteInspectionButton'
 import RemoveSectionControl from '@/app/components/RemoveSectionControl'
 import SaveChangesButton from '@/app/components/SaveChangesButton'
 import VideoProcessingPanel from '@/app/components/VideoProcessingPanel'
+import CreateBatchesButton from '@/app/components/CreateBatchesButton'
 import type { InspectionVideoRow } from '@/app/actions'
 
 // Raised from the platform default for processNextInspectionVideo (called
@@ -43,7 +44,7 @@ type LineItem = {
   trade_category: string | null
   recommended_action: string | null
   priority: string | null
-  tenant_approved: boolean
+  tenant_charge: boolean
   is_manual_addition: boolean
   source_video_file: string | null
   source_video_drive_file_id: string | null
@@ -136,11 +137,7 @@ export default async function InspectionPage({
               <a href={`/dispatch-board?job=${id}`} className={linkClass}>
                 Dispatch Board
               </a>
-              <form action={createBatches.bind(null, id)}>
-                <button type="submit" className={linkClass}>
-                  Create Batches
-                </button>
-              </form>
+              <CreateBatchesButton inspectionId={id} label="Create Batches" className={linkClass} />
               <a href={`/inspections/${id}/quote-sheet/stages`} className={linkClass}>
                 Stage View
               </a>
@@ -205,6 +202,46 @@ export default async function InspectionPage({
         </div>
       )}
 
+      {/* Manually entered -- no PMS integration exists to pull these from
+          (2026-09-22 feedback: wanted as a merged exhibit on the Move-Out
+          Report, same as zinspector does). Editable any time, since these
+          are often unknown at initial inspection time. */}
+      <form
+        action={updateInspectionBilling.bind(null, id)}
+        className="flex flex-wrap items-end gap-3 px-4 md:px-6 py-3 border-b border-border"
+      >
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1">
+            Lease Name
+          </label>
+          <input
+            name="lease_name"
+            defaultValue={inspection.lease_name ?? ''}
+            placeholder="For the Move-Out Report exhibit"
+            className="border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 w-56 bg-surface text-[13px]"
+          />
+        </div>
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1">
+            Security Deposit
+          </label>
+          <input
+            name="security_deposit_amount"
+            type="number"
+            step="0.01"
+            defaultValue={inspection.security_deposit_amount ?? ''}
+            placeholder="0.00"
+            className="data-mono border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 w-32 bg-surface text-[13px]"
+          />
+        </div>
+        <button
+          type="submit"
+          className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold"
+        >
+          Save
+        </button>
+      </form>
+
       {areas.length > 0 && (
         <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 md:px-6 py-3 border-b border-border bg-surface-alt">
           {areas.map((area) => (
@@ -226,7 +263,7 @@ export default async function InspectionPage({
             role="row"
             className={`hidden md:grid ${ROW_COLS} gap-2 px-3 py-2.5 border-b border-border`}
           >
-            {['Item', 'Condition', 'Remove from Quote Sheet'].map(
+            {['Item', 'Condition', 'Tenant Chargeback'].map(
               (h) => (
                 <div
                   key={h}
@@ -314,11 +351,11 @@ export default async function InspectionPage({
               <div role="cell" className="min-w-0 flex items-center gap-2 md:justify-center">
                 <input
                   type="checkbox"
-                  name={`tenant_approved__${li.id}`}
-                  defaultChecked={li.tenant_approved}
-                  className="h-4 w-4 cursor-pointer accent-error"
+                  name={`tenant_charge__${li.id}`}
+                  defaultChecked={li.tenant_charge}
+                  className="h-4 w-4 cursor-pointer accent-accent"
                 />
-                <span className="md:hidden text-[11px] text-text-muted">Remove from Quote Sheet</span>
+                <span className="md:hidden text-[11px] text-text-muted">Tenant Chargeback</span>
               </div>
             </div>
           ))}
