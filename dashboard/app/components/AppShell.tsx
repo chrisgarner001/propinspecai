@@ -4,6 +4,7 @@ import RecentNav from './RecentNav'
 import HelpWidget from './HelpWidget'
 import MobileNav from './MobileNav'
 import LogoutButton from './LogoutButton'
+import BackButton from './BackButton'
 
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard' },
@@ -89,8 +90,11 @@ export default function AppShell({
         </div>
       </nav>
       <div className="min-w-0">
-        <header className="flex items-center justify-between flex-wrap gap-4 px-4 py-3 md:px-6 md:py-4 border-b border-border">
-          {headerContent ?? <h1 className="font-display font-bold text-[17px] truncate">{title}</h1>}
+        <header className="flex items-center gap-3 px-4 py-3 md:px-6 md:py-4 border-b border-border">
+          <BackButton />
+          <div className="flex items-center justify-between flex-wrap gap-4 flex-1 min-w-0">
+            {headerContent ?? <h1 className="font-display font-bold text-[17px] truncate">{title}</h1>}
+          </div>
         </header>
         <main>{children}</main>
       </div>
