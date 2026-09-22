@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import bcrypt from 'bcryptjs'
+import { requireSessionOrThrow, requireAdminOrThrow } from '@/lib/dal'
 
 function toNumberOrNull(value: FormDataEntryValue | null): number | null {
   if (value === null || value === '') return null
@@ -29,6 +30,7 @@ function toNumberOrNull(value: FormDataEntryValue | null): number | null {
 // would have silently wiped assigned_to/materials_cost/labor_hours/
 // labor_cost/vendor_estimated_cost/vendor_id to null on every line item.
 export async function bulkUpdateLineItems(formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
   const inspectionId = String(formData.get('inspection_id'))
   const ids = formData.getAll('ids').map(String)
@@ -70,6 +72,7 @@ export async function bulkUpdateLineItems(formData: FormData) {
 // disposition deadline without wading through (or accidentally clobbering)
 // the AI-extraction/Quote-Sheet fields this page doesn't even show.
 export async function updateChargebackReview(formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
   const inspectionId = String(formData.get('inspection_id'))
   const ids = formData.getAll('ids').map(String)
@@ -100,6 +103,7 @@ export async function updateChargebackReview(formData: FormData) {
 // same "type a reference, submit" shape, or drop it once posting is fully
 // automated.
 export async function postMoveOutReport(inspectionId: string, formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
   const pwReference = String(formData.get('pw_reference') ?? '').trim()
   if (!pwReference) return
@@ -120,6 +124,7 @@ export async function postMoveOutReport(inspectionId: string, formData: FormData
 // page); this page's whole purpose is polishing the item text before it goes
 // to the owner, so those two fields ARE editable here.
 export async function updateQuoteSheetItems(formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
   const inspectionId = String(formData.get('inspection_id'))
   const ids = formData.getAll('ids').map(String)
@@ -195,6 +200,7 @@ export async function updateQuoteSheetItems(formData: FormData) {
 // button must not clobber existing batches.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, inspectionId) call site; formAction always passes the triggering form's FormData last
 export async function createBatches(inspectionId: string, _formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
 
   const items = await sql`
@@ -240,6 +246,7 @@ export async function createBatches(inspectionId: string, _formData: FormData) {
 // means replacing the body of this function; callers/UI stay the same.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, inspectionId, batchNumber) call site; formAction always passes the triggering form's FormData last
 export async function sendBatchToPW(inspectionId: string, batchNumber: number, formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
   const pwWorkOrderNumber = String(formData.get('pw_work_order_number') ?? '').trim()
   if (!pwWorkOrderNumber) return
@@ -256,6 +263,7 @@ export async function sendBatchToPW(inspectionId: string, batchNumber: number, f
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, id, inspectionId) call site; formAction always passes the triggering form's FormData last
 export async function duplicateLineItem(id: string, inspectionId: string, _formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
 
   const [original] = await sql`select * from line_items where id = ${id}`
@@ -310,6 +318,7 @@ export async function duplicateLineItem(id: string, inspectionId: string, _formD
 // variable-length list back out of one big form's FormData is real added
 // complexity a plain insert-now button avoids entirely.
 export async function addLineItemSku(lineItemId: string, inspectionId: string, formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
   const supplier = String(formData.get(`new_sku_supplier__${lineItemId}`) ?? '').trim() || null
   const sku = String(formData.get(`new_sku__${lineItemId}`) ?? '').trim() || null
@@ -328,6 +337,7 @@ export async function addLineItemSku(lineItemId: string, inspectionId: string, f
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, id, inspectionId) call site; formAction always passes the triggering form's FormData last
 export async function removeLineItemSku(id: string, inspectionId: string, _formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
   await sql`delete from line_item_additional_skus where id = ${id}`
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
@@ -340,6 +350,7 @@ export async function removeLineItemSku(id: string, inspectionId: string, _formD
 // component, not a form -- a plain object arg like updateLineItemSchedule,
 // not FormData, since there's no form to read it from.
 export async function addLineItemSkuFromBulkMaterial(lineItemId: string, inspectionId: string, bulkMaterialId: string) {
+  await requireSessionOrThrow()
   const sql = getSql()
   const [bm] = await sql`select supplier, sku from inspection_bulk_materials where id = ${bulkMaterialId}`
   if (!bm) return
@@ -356,6 +367,7 @@ export async function addLineItemSkuFromBulkMaterial(lineItemId: string, inspect
 // above, for the same reason: a plain add-now/remove-now button is simpler
 // than folding a dynamic-length list into the bulk save.
 export async function addBulkMaterial(inspectionId: string, formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
   const supplier = String(formData.get('bulk_supplier') ?? '').trim() || null
   const sku = String(formData.get('bulk_sku') ?? '').trim() || null
@@ -377,6 +389,7 @@ export async function addBulkMaterial(inspectionId: string, formData: FormData) 
 // supplier/sku -- an edit usually means the reviewer is fixing exactly the
 // thing that made it match wrong (or not match at all) the first time.
 export async function updateBulkMaterial(id: string, inspectionId: string, formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
   const supplier = String(formData.get('bulk_supplier') ?? '').trim() || null
   const sku = String(formData.get('bulk_sku') ?? '').trim() || null
@@ -395,6 +408,7 @@ export async function updateBulkMaterial(id: string, inspectionId: string, formD
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, id, inspectionId) call site; formAction always passes the triggering form's FormData last
 export async function removeBulkMaterial(id: string, inspectionId: string, _formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
   await sql`delete from inspection_bulk_materials where id = ${id}`
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
@@ -410,6 +424,7 @@ export async function removeBulkMaterial(id: string, inspectionId: string, _form
 // server-side even though the banner only offers items that were blank at
 // render time, in case the sheet was edited in another tab since.
 export async function applyBulkMaterialMatches(bulkMaterialId: string, inspectionId: string, formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
   const lineItemIds = formData.getAll('apply_item_id').map(String)
   const [bm] = await sql`select supplier, sku from inspection_bulk_materials where id = ${bulkMaterialId}`
@@ -431,6 +446,7 @@ export async function applyBulkMaterialMatches(bulkMaterialId: string, inspectio
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, id, inspectionId) call site; formAction always passes the triggering form's FormData last
 export async function dismissBulkMaterialMatches(bulkMaterialId: string, inspectionId: string, _formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
   await sql`update inspection_bulk_materials set matches_reviewed = true where id = ${bulkMaterialId}`
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
@@ -450,6 +466,7 @@ export async function dismissBulkMaterialMatches(bulkMaterialId: string, inspect
 // now that picking a value submits immediately -- a plain arg, not FormData,
 // since there's no form involved anymore.
 export async function linkLineItemToBulkMaterial(lineItemId: string, inspectionId: string, bulkMaterialId: string) {
+  await requireSessionOrThrow()
   if (!bulkMaterialId) return
   const sql = getSql()
   const [bm] = await sql`select supplier, sku from inspection_bulk_materials where id = ${bulkMaterialId}`
@@ -476,6 +493,7 @@ export async function updateLineItemSchedule(input: {
   scheduledEnd: string | null
   blocksLineItemId: string | null
 }): Promise<{ error?: string }> {
+  await requireSessionOrThrow()
   const sql = getSql()
   const { id, inspectionId, blocksLineItemId } = input
 
@@ -533,6 +551,7 @@ export async function updateStagePlacement(input: {
   scheduledEnd: string
   reassignTo?: { assignedTo: string; vendorId: string | null }
 }): Promise<void> {
+  await requireSessionOrThrow()
   const sql = getSql()
 
   await sql.begin(async (tx) => {
@@ -556,6 +575,7 @@ export async function updateStagePlacement(input: {
 }
 
 export async function addLineItem(formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
   const inspectionId = String(formData.get('inspection_id'))
   const roomArea = String(formData.get('room_area'))
@@ -576,6 +596,7 @@ export async function addLineItem(formData: FormData) {
 }
 
 export async function createInspection(formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
   const jobNumber = String(formData.get('job_number'))
   const propertyAddress = String(formData.get('property_address'))
@@ -603,6 +624,7 @@ export async function createInspection(formData: FormData) {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, id) call site; formAction always passes the triggering form's FormData last
 export async function deleteInspection(id: string, _formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
   await sql`delete from inspections where id = ${id}`
   revalidatePath('/')
@@ -610,6 +632,7 @@ export async function deleteInspection(id: string, _formData: FormData) {
 }
 
 export async function updateInspectionStatus(formData: FormData) {
+  await requireSessionOrThrow()
   const sql = getSql()
   const inspectionId = String(formData.get('inspection_id'))
   const status = String(formData.get('status'))
@@ -621,6 +644,7 @@ export async function updateInspectionStatus(formData: FormData) {
 }
 
 export async function createVendor(formData: FormData) {
+  await requireAdminOrThrow()
   const sql = getSql()
   const name = String(formData.get('name') ?? '').trim()
   if (!name) return
@@ -635,6 +659,7 @@ export async function createVendor(formData: FormData) {
 // vendor got newly assigned between page load and submit. Swallow it rather
 // than 500ing; the page's own count will catch up on revalidate.
 export async function deleteVendor(vendorId: string) {
+  await requireAdminOrThrow()
   const sql = getSql()
   try {
     await sql`delete from vendors where id = ${vendorId}`
@@ -645,6 +670,7 @@ export async function deleteVendor(vendorId: string) {
 }
 
 export async function createStage(formData: FormData) {
+  await requireAdminOrThrow()
   const sql = getSql()
   const name = String(formData.get('name') ?? '').trim()
   if (!name) return
@@ -656,6 +682,7 @@ export async function createStage(formData: FormData) {
 }
 
 export async function updateStageName(stageId: string, formData: FormData) {
+  await requireAdminOrThrow()
   const sql = getSql()
   const name = String(formData.get('name') ?? '').trim()
   if (!name) return
@@ -694,17 +721,20 @@ async function swapStageOrder(stageId: string, direction: 'up' | 'down') {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, stageId) call site; formAction always passes the triggering form's FormData last
 export async function moveStageUp(stageId: string, _formData: FormData) {
+  await requireAdminOrThrow()
   await swapStageOrder(stageId, 'up')
   revalidatePath('/setup/stages')
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by the .bind(null, stageId) call site; formAction always passes the triggering form's FormData last
 export async function moveStageDown(stageId: string, _formData: FormData) {
+  await requireAdminOrThrow()
   await swapStageOrder(stageId, 'down')
   revalidatePath('/setup/stages')
 }
 
 export async function updateSettings(formData: FormData) {
+  await requireAdminOrThrow()
   const sql = getSql()
   const gpmLaborCharge = toNumberOrNull(formData.get('gpm_labor_charge')) ?? 0
   const materialMarkupPct = toNumberOrNull(formData.get('material_markup_pct')) ?? 0
@@ -736,6 +766,7 @@ export type InspectionVideoRow = {
 // added to the folder after the first pass). Does not process anything
 // itself; that's processNextInspectionVideo, called in a loop by the client.
 export async function syncInspectionVideos(inspectionId: string): Promise<{ error?: string; videos?: InspectionVideoRow[] }> {
+  await requireSessionOrThrow()
   const sql = getSql()
   const [inspection] = await sql`select source_video_drive_folder_url from inspections where id = ${inspectionId}`
   if (!inspection?.source_video_drive_folder_url) {
@@ -782,6 +813,7 @@ export async function syncInspectionVideos(inspectionId: string): Promise<{ erro
 // silently (the original design doc's own failure-mode requirement: fail
 // loudly, don't drop a bad file quietly).
 export async function processNextInspectionVideo(inspectionId: string): Promise<{ done: boolean; videos: InspectionVideoRow[] }> {
+  await requireSessionOrThrow()
   const sql = getSql()
   const [next] = await sql`
     select id, drive_file_id, filename from inspection_videos
@@ -865,6 +897,7 @@ export async function processNextInspectionVideo(inspectionId: string): Promise<
 // call in the loop picks it up again -- e.g. after fixing a Drive-permissions
 // issue that caused the original failure.
 export async function retryInspectionVideo(videoRowId: string, inspectionId: string): Promise<{ videos: InspectionVideoRow[] }> {
+  await requireSessionOrThrow()
   const sql = getSql()
   await sql`update inspection_videos set status = 'pending', error_message = null where id = ${videoRowId} and status = 'failed'`
 
@@ -887,6 +920,7 @@ export async function createImageShareLink(
   inspectionId: string,
   images: { url: string; roomArea: string; item: string }[]
 ): Promise<{ url?: string; error?: string }> {
+  await requireSessionOrThrow()
   if (images.length === 0) return { error: 'Select at least one image first.' }
   const sql = getSql()
   const token = randomUUID()
@@ -908,6 +942,7 @@ export async function askHelp(
   history: HelpMessage[]
 ): Promise<{ answer?: string; error?: string }> {
   try {
+    await requireSessionOrThrow()
     const pageData = await getPageContext(pathname)
     const answer = await askHelpAssistant(question, history, pageData)
     return { answer }
@@ -916,16 +951,16 @@ export async function askHelp(
   }
 }
 
-// Manage Users (Setup) -- no session/login enforcement exists yet (see
-// app/login/page.tsx), this is just the user-record backend for it. Called
-// directly from CreateUserForm.tsx (useTransition), not a plain form action,
-// so a duplicate-email/short-password rejection can be shown inline instead
-// of silently no-oping the way createVendor/createStage do.
+// Manage Users (Setup, Admin-only). Called directly from CreateUserForm.tsx
+// (useTransition), not a plain form action, so a duplicate-email/
+// short-password rejection can be shown inline instead of silently no-oping
+// the way createVendor/createStage do.
 export async function createUser(
   email: string,
   password: string,
   role: string
 ): Promise<{ error?: string }> {
+  await requireAdminOrThrow()
   const sql = getSql()
   const normalizedEmail = email.trim().toLowerCase()
   if (!normalizedEmail || !normalizedEmail.includes('@')) {
@@ -958,6 +993,7 @@ export async function createUser(
 }
 
 export async function deleteUser(userId: string) {
+  await requireAdminOrThrow()
   const sql = getSql()
   await sql`delete from users where id = ${userId}`
   revalidatePath('/setup/users')

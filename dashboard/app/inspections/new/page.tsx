@@ -1,4 +1,5 @@
 import { createInspection } from '@/app/actions'
+import { requireSession } from '@/lib/dal'
 import AppShell from '@/app/components/AppShell'
 import SpecialInstructionsField from '@/app/components/SpecialInstructionsField'
 
@@ -8,7 +9,8 @@ const helpClass = 'text-[12px] text-text-muted mt-1'
 
 const SPECIAL_INSTRUCTIONS_EXAMPLE = `The house has serious damage to the walls and carpet, this is pointed out in the video but is throughout the entire house. The backyard is completely overgrown. The garage needs special attention, looks like structural damage.`
 
-export default function NewInspectionPage() {
+export default async function NewInspectionPage() {
+  await requireSession()
   return (
     <AppShell active="/" title="Add new inspection">
       <form action={createInspection} className="p-6 max-w-lg space-y-4">

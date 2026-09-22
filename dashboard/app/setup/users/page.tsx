@@ -1,4 +1,5 @@
 import { getSql } from '@/lib/db'
+import { requireAdmin } from '@/lib/dal'
 import AppShell from '@/app/components/AppShell'
 import CreateUserForm from '@/app/components/CreateUserForm'
 import DeleteInspectionButton from '@/app/components/DeleteInspectionButton'
@@ -8,11 +9,10 @@ export const dynamic = 'force-dynamic'
 
 type User = { id: string; email: string; role: string; created_at: string }
 
-// No session/login enforcement exists yet (app/login/page.tsx is still
-// decorative) -- this page is the user-record backend Chris asked for ahead
-// of that: email + password (bcrypt-hashed, never selected here) + an
-// Admin / General User access level.
+// Accounts: email + password (bcrypt-hashed, never selected here) + an
+// Admin / General User access level. Admin-only page (requireAdmin below).
 export default async function ManageUsersPage() {
+  await requireAdmin()
   const sql = getSql()
   const users = (await sql`
     select id, email, role, created_at from users order by created_at

@@ -1,4 +1,5 @@
 import { getSql } from '@/lib/db'
+import { requireSession } from '@/lib/dal'
 import { notFound } from 'next/navigation'
 import AppShell from '@/app/components/AppShell'
 import ImageShareGallery from '@/app/components/ImageShareGallery'
@@ -14,6 +15,7 @@ import ImageShareGallery from '@/app/components/ImageShareGallery'
 type StillRow = { id: string; room_area: string; item: string; still_image_file: string }
 
 export default async function InspectionStillsPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireSession()
   const { id } = await params
   const sql = getSql()
 

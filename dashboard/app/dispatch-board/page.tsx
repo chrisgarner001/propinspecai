@@ -1,4 +1,5 @@
 import { getSql } from '@/lib/db'
+import { requireSession } from '@/lib/dal'
 import AppShell from '@/app/components/AppShell'
 import DispatchBoard, { type BoardItem, type CrewRow, type PropertyRow } from '@/app/components/DispatchBoard'
 
@@ -26,6 +27,7 @@ export default async function DispatchBoardPage({
 }: {
   searchParams: Promise<{ job?: string }>
 }) {
+  await requireSession()
   const { job: focusInspectionId } = await searchParams
   const sql = getSql()
 

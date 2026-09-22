@@ -2,18 +2,6 @@
 
 ## Infrastructure
 
-### Build real authentication/session system
-
-**What:** Add a real login/session model to PropInspec — currently none exists anywhere in the app.
-
-**Why:** Every page (inspections, cost book, setup, and the new Job Timeline's scheduling data) is reachable by anyone with the production URL. `dashboard/app/login/page.tsx` is explicit about this in its own code comment: "Decorative placeholder for now -- no user/session model exists yet, so this screen does not gate access to the rest of the app." "Staff-only" anywhere in this app (including the Job Timeline feature) is a UI convention, not an enforced boundary.
-
-**Context:** Surfaced twice (office-hours 2026-09-11 and /plan-eng-review 2026-09-11) as a pre-existing, whole-app gap — not introduced by any single feature. Likely shape: NextAuth or Supabase Auth, a real user/account table (today `reviewerName` is a hardcoded prop string, e.g. "Jessica Zilka", passed to `AppShell` at every call site, not derived from any session), and route guards. Deserves its own design/eng-review pass rather than riding in on an unrelated PR.
-
-**Effort:** L
-**Priority:** P2
-**Depends on:** None
-
 ### Retroactive test coverage for existing PropInspec code
 
 **What:** Add automated tests for everything shipped before the Job Timeline PR — `bulkUpdateLineItems`, `duplicateLineItem`, `addLineItem`, Turn Scope Google Sheet generation, Move Out Report PDF generation, the inspection detail page, Cost Book, Setup.

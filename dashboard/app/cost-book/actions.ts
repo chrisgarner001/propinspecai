@@ -2,6 +2,7 @@
 
 import { getSql } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
+import { requireAdminOrThrow } from '@/lib/dal'
 
 function toNumberOrNull(value: FormDataEntryValue | null): number | null {
   if (value === null || value === '') return null
@@ -12,6 +13,7 @@ function toNumberOrNull(value: FormDataEntryValue | null): number | null {
 // --- GPM Labor ---
 
 export async function addGpmLaborRate(formData: FormData) {
+  await requireAdminOrThrow()
   const sql = getSql()
   const taskName = String(formData.get('task_name'))
   const laborRate = toNumberOrNull(formData.get('labor_rate'))
@@ -26,6 +28,7 @@ export async function addGpmLaborRate(formData: FormData) {
 }
 
 export async function updateGpmLaborRate(formData: FormData) {
+  await requireAdminOrThrow()
   const sql = getSql()
   const id = String(formData.get('id'))
   const laborRate = toNumberOrNull(formData.get('labor_rate'))
@@ -43,6 +46,7 @@ export async function updateGpmLaborRate(formData: FormData) {
 // --- Materials ---
 
 export async function addMaterial(formData: FormData) {
+  await requireAdminOrThrow()
   const sql = getSql()
   const materialName = String(formData.get('material_name'))
   const unitPrice = toNumberOrNull(formData.get('unit_price'))
@@ -59,6 +63,7 @@ export async function addMaterial(formData: FormData) {
 }
 
 export async function updateMaterial(formData: FormData) {
+  await requireAdminOrThrow()
   const sql = getSql()
   const id = String(formData.get('id'))
   const unitPrice = toNumberOrNull(formData.get('unit_price'))
@@ -78,6 +83,7 @@ export async function updateMaterial(formData: FormData) {
 // --- Vendor Estimates ---
 
 export async function addVendorEstimate(formData: FormData) {
+  await requireAdminOrThrow()
   const sql = getSql()
   const tradeCategory = String(formData.get('trade_category'))
   const taskName = String(formData.get('task_name'))
@@ -92,6 +98,7 @@ export async function addVendorEstimate(formData: FormData) {
 }
 
 export async function updateVendorEstimate(formData: FormData) {
+  await requireAdminOrThrow()
   const sql = getSql()
   const id = String(formData.get('id'))
   const estimatedCost = toNumberOrNull(formData.get('estimated_cost'))

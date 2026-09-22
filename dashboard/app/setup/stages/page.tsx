@@ -1,4 +1,5 @@
 import { getSql } from '@/lib/db'
+import { requireAdmin } from '@/lib/dal'
 import { createStage, updateStageName, moveStageUp, moveStageDown } from '@/app/actions'
 import AppShell from '@/app/components/AppShell'
 
@@ -16,6 +17,7 @@ const orderButtonClass =
 // order set here is the order they appear in every Stage dropdown and
 // summary across the app (Quote Sheet, Stage View, Job Timeline).
 export default async function StagesSetupPage() {
+  await requireAdmin()
   const sql = getSql()
   const stages = (await sql`select id, name, sort_order from stages order by sort_order`) as unknown as Stage[]
 

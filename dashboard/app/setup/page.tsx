@@ -1,4 +1,5 @@
 import { getSql } from '@/lib/db'
+import { requireAdmin } from '@/lib/dal'
 import { updateSettings, createVendor, deleteVendor } from '@/app/actions'
 import AppShell from '@/app/components/AppShell'
 import Link from 'next/link'
@@ -19,6 +20,7 @@ const labelClass = 'font-medium'
 const helpClass = 'text-[12px] text-text-muted mt-1'
 
 export default async function SetupPage() {
+  await requireAdmin()
   const sql = getSql()
   const [settings] = (await sql`select * from settings where id = true`) as unknown as Settings[]
   const vendors = (await sql`

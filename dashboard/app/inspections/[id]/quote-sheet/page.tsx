@@ -1,4 +1,5 @@
 import { getSql } from '@/lib/db'
+import { requireSession } from '@/lib/dal'
 import { notFound } from 'next/navigation'
 import {
   updateQuoteSheetItems,
@@ -103,6 +104,7 @@ export default async function QuoteSheetPage({
   params: Promise<{ id: string }>
   searchParams: Promise<{ editBulk?: string }>
 }) {
+  await requireSession()
   const { id } = await params
   const { editBulk } = await searchParams
   const sql = getSql()

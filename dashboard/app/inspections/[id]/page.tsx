@@ -1,4 +1,5 @@
 import { getSql } from '@/lib/db'
+import { requireSession } from '@/lib/dal'
 import { bulkUpdateLineItems, addLineItem, duplicateLineItem, deleteInspection, createBatches } from '@/app/actions'
 import { notFound } from 'next/navigation'
 import AppShell from '@/app/components/AppShell'
@@ -64,6 +65,7 @@ export default async function InspectionPage({
 }: {
   params: Promise<{ id: string }>
 }) {
+  await requireSession()
   const { id } = await params
   const sql = getSql()
 

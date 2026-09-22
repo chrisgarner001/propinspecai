@@ -8,6 +8,23 @@ import { duplicateLineItem, updateLineItemSchedule, syncInspectionVideos, proces
 // state), so it's mocked out rather than worked around in production code.
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 
+// Every action under test now calls requireSessionOrThrow()/requireAdminOrThrow()
+// (docs/designs/propinspec-authentication.md) -- both read next/headers'
+// cookies(), which needs a real request context these direct calls don't
+// have, same reasoning as the next/cache mock above. Mocked to a fixed
+// Admin session so these tests verify the DB state machine they're actually
+// about, not the auth layer (auth has its own tests).
+vi.mock('@/lib/dal', () => {
+  const fakeSession = { userId: 'vitest-admin', email: 'vitest@example.com', role: 'Admin' }
+  return {
+    verifySession: vi.fn(async () => fakeSession),
+    requireSession: vi.fn(async () => fakeSession),
+    requireAdmin: vi.fn(async () => fakeSession),
+    requireSessionOrThrow: vi.fn(async () => fakeSession),
+    requireAdminOrThrow: vi.fn(async () => fakeSession),
+  }
+})
+
 // Drive/Gemini calls are mocked -- these tests verify the DB state machine
 // (pending -> processing -> done/failed, line items inserted or not), not
 // real network calls to Google's APIs. parseFolderIdFromUrl is real (pure

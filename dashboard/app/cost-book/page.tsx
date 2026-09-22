@@ -1,4 +1,5 @@
 import { getSql } from '@/lib/db'
+import { requireAdmin } from '@/lib/dal'
 import {
   addGpmLaborRate,
   updateGpmLaborRate,
@@ -59,6 +60,7 @@ function SectionHeading({ title, description }: { title: string; description: st
 const mobileLabelClass = 'md:hidden text-[10px] font-semibold uppercase tracking-wide text-text-muted'
 
 export default async function CostBookPage() {
+  await requireAdmin()
   const sql = getSql()
   const gpmLabor = (await sql`
     select * from cost_book_gpm_labor order by task_name

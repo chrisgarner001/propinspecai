@@ -1,4 +1,5 @@
 import { getSql } from '@/lib/db'
+import { requireSession } from '@/lib/dal'
 import Link from 'next/link'
 import AppShell from './components/AppShell'
 import StatusBadge, { STATUS_STYLES, STATUS_ORDER } from './components/StatusBadge'
@@ -85,6 +86,7 @@ function InspectionTable({ inspections }: { inspections: InspectionRow[] }) {
 }
 
 export default async function Home() {
+  await requireSession()
   const sql = getSql()
   const inspections = (await sql`
     select id, job_number, property_address, inspection_date, inspector_name, status

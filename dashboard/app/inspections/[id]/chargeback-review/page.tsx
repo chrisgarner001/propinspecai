@@ -1,4 +1,5 @@
 import { getSql } from '@/lib/db'
+import { requireSession } from '@/lib/dal'
 import { notFound } from 'next/navigation'
 import { updateChargebackReview } from '@/app/actions'
 import AppShell from '@/app/components/AppShell'
@@ -27,6 +28,7 @@ type LineItem = {
 }
 
 export default async function ChargebackReviewPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireSession()
   const { id } = await params
   const sql = getSql()
 

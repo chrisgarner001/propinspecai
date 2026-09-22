@@ -1,4 +1,5 @@
 import { getSql } from '@/lib/db'
+import { requireSession } from '@/lib/dal'
 import { notFound } from 'next/navigation'
 import AppShell from '@/app/components/AppShell'
 
@@ -82,6 +83,7 @@ function ItemsTable({
 }
 
 export default async function QuoteSheetStagesPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireSession()
   const { id } = await params
   const sql = getSql()
 

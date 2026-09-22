@@ -1,8 +1,6 @@
 import Image from 'next/image'
-import Link from 'next/link'
+import LoginForm from '@/app/components/LoginForm'
 
-// Decorative placeholder for now -- no user/session model exists yet, so this
-// screen does not gate access to the rest of the app. See DESIGN.md.
 export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center">
@@ -14,12 +12,7 @@ export default function LoginPage() {
           </div>
         </div>
         <p className="text-[13px] text-text-muted mb-6">Move-out inspection review dashboard</p>
-        <Link
-          href="/"
-          className="inline-block w-full bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-4 py-2.5 text-[13px] font-semibold"
-        >
-          Continue
-        </Link>
+        <LoginForm />
       </div>
     </div>
   )

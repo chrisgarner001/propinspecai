@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
+import LogoutButton from './LogoutButton'
 
 // Below md, AppShell's sidebar (hidden entirely) is replaced by this slim top
 // bar + a tap-to-open drawer, so the nav rail never eats horizontal space on
@@ -46,6 +47,9 @@ export default function MobileNav({
               </Link>
             </li>
           ))}
+          <li className="px-4 py-3">
+            <LogoutButton className="text-[14px] font-semibold text-text-muted" />
+          </li>
         </ul>
       )}
     </div>

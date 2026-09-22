@@ -3,6 +3,7 @@ import Link from 'next/link'
 import RecentNav from './RecentNav'
 import HelpWidget from './HelpWidget'
 import MobileNav from './MobileNav'
+import LogoutButton from './LogoutButton'
 
 const NAV_ITEMS = [
   { href: '/', label: 'Inspections' },
@@ -81,6 +82,9 @@ export default function AppShell({
           ))}
         </ul>
         <RecentNav label={title} />
+        <div className="mt-4 pt-4 border-t border-border">
+          <LogoutButton />
+        </div>
       </nav>
       <div className="min-w-0">
         <header className="flex items-center justify-between flex-wrap gap-4 px-4 py-3 md:px-6 md:py-4 border-b border-border">
