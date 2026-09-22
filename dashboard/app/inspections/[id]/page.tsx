@@ -49,6 +49,7 @@ type LineItem = {
   source_video_file: string | null
   source_video_drive_file_id: string | null
   still_image_file: string | null
+  captured_at: string | null
 }
 
 type Vendor = { id: string; name: string }
@@ -91,6 +92,12 @@ export default async function InspectionPage({
   `) as unknown as InspectionVideoRow[]
 
   const quoteActionsVisible = QUOTE_ACTIONS_VISIBLE_STATUSES.includes(inspection.status)
+  // Quote Sheet / Tenant Chargeback Review / everything downstream of them
+  // only make sense for a Move-Out inspection -- a Move-In or other
+  // non-Move-Out type has no quote or tenant charge to review
+  // (docs/designs/propinspec-inspection-type-gallery.md). No replacement
+  // action takes their place; the toolbar just omits them.
+  const isMoveOut = inspection.inspection_type === 'Move-Out'
 
   const linkClass =
     'bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap'
@@ -104,7 +111,7 @@ export default async function InspectionPage({
         <>
           <div className="flex items-center gap-4 flex-wrap min-w-0">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-text-muted whitespace-nowrap">
-              Inspection Report
+              {inspection.inspection_type} Inspection
             </span>
             <h1 className="font-display font-bold text-[17px] truncate">
               Property: {inspection.property_address}
@@ -126,32 +133,36 @@ export default async function InspectionPage({
     >
       <div className="flex items-center justify-between gap-2 px-4 md:px-6 py-3 border-b border-border bg-surface-alt flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
-          <a href={`/inspections/${id}/chargeback-review`} className={linkClass}>
-            Tenant Chargeback Review
-          </a>
-          <a href={`/inspections/${id}/quote-sheet`} className={linkClass}>
-            Quote and Schedule
-          </a>
-          {quoteActionsVisible && (
+          {isMoveOut && (
             <>
-              <a href={`/dispatch-board?job=${id}`} className={linkClass}>
-                Dispatch Board
+              <a href={`/inspections/${id}/chargeback-review`} className={linkClass}>
+                Tenant Chargeback Review
               </a>
-              <CreateBatchesButton inspectionId={id} label="Create Batches" className={linkClass} />
-              <a href={`/inspections/${id}/quote-sheet/stages`} className={linkClass}>
-                Stage View
+              <a href={`/inspections/${id}/quote-sheet`} className={linkClass}>
+                Quote and Schedule
               </a>
-              <a href={`/inspections/${id}/quote-sheet/materials-order/pdf`} target="_blank" rel="noopener noreferrer" className={linkClass}>
-                Materials Order List
-              </a>
-              <a
-                href={`/inspections/${id}/quote-sheet/pdf`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-3.5 py-2 text-[13px] font-semibold whitespace-nowrap"
-              >
-                Create Quote
-              </a>
+              {quoteActionsVisible && (
+                <>
+                  <a href={`/dispatch-board?job=${id}`} className={linkClass}>
+                    Dispatch Board
+                  </a>
+                  <CreateBatchesButton inspectionId={id} label="Create Batches" className={linkClass} />
+                  <a href={`/inspections/${id}/quote-sheet/stages`} className={linkClass}>
+                    Stage View
+                  </a>
+                  <a href={`/inspections/${id}/quote-sheet/materials-order/pdf`} target="_blank" rel="noopener noreferrer" className={linkClass}>
+                    Materials Order List
+                  </a>
+                  <a
+                    href={`/inspections/${id}/quote-sheet/pdf`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-3.5 py-2 text-[13px] font-semibold whitespace-nowrap"
+                  >
+                    Create Quote
+                  </a>
+                </>
+              )}
             </>
           )}
         </div>
@@ -328,7 +339,7 @@ export default async function InspectionPage({
                       </div>
                     )}
                   </div>
-                  <EvidenceStill stillImageFile={li.still_image_file} />
+                  <EvidenceStill stillImageFile={li.still_image_file} capturedAt={li.captured_at} />
                   {li.source_video_file && (
                     <VideoPopupLink filename={li.source_video_file} driveFileId={li.source_video_drive_file_id} />
                   )}

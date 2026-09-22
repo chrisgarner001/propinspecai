@@ -17,6 +17,7 @@ type InspectionRow = {
   inspection_date: string
   inspector_name: string
   status: string
+  inspection_type: string
 }
 
 // Grouped in STATUS_ORDER (the same canonical order every status pill uses),
@@ -42,6 +43,11 @@ function InspectionTable({ inspections }: { inspections: InspectionRow[] }) {
                 <Link href={`/inspections/${i.id}`} className="font-semibold hover:underline">
                   {i.property_address}
                 </Link>
+                {i.inspection_type !== 'Move-Out' && (
+                  <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-accent border border-accent/40 rounded-[var(--radius-sm)] px-1.5 py-0.5">
+                    {i.inspection_type}
+                  </span>
+                )}
                 <div className="data-mono text-[11px] text-text-muted">Job {i.job_number}</div>
               </td>
               <td className="px-6 py-3 whitespace-nowrap">{i.inspector_name}</td>
@@ -63,9 +69,16 @@ function InspectionTable({ inspections }: { inspections: InspectionRow[] }) {
         {inspections.map((i) => (
           <div key={i.id} className="px-4 py-3 border-b border-border">
             <div className="flex items-start justify-between gap-2">
-              <Link href={`/inspections/${i.id}`} className="font-semibold hover:underline text-[13px]">
-                {i.property_address}
-              </Link>
+              <div>
+                <Link href={`/inspections/${i.id}`} className="font-semibold hover:underline text-[13px]">
+                  {i.property_address}
+                </Link>
+                {i.inspection_type !== 'Move-Out' && (
+                  <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-accent border border-accent/40 rounded-[var(--radius-sm)] px-1.5 py-0.5">
+                    {i.inspection_type}
+                  </span>
+                )}
+              </div>
               <StatusBadge status={i.status} />
             </div>
             <div className="data-mono text-[11px] text-text-muted mt-0.5">Job {i.job_number}</div>
@@ -88,11 +101,14 @@ function InspectionTable({ inspections }: { inspections: InspectionRow[] }) {
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>
+  searchParams: Promise<{ q?: string; type?: string }>
 }) {
   await requireSession()
-  const { q: qRaw } = await searchParams
+  const { q: qRaw, type: typeRaw } = await searchParams
   const q = qRaw?.trim() || undefined
+  // Empty/missing/"All" all mean "no type filter" -- defaults to showing
+  // every type, not Move-Out-only (docs/designs/propinspec-inspection-type-gallery.md).
+  const type = typeRaw && typeRaw !== 'All' ? typeRaw : undefined
   const sql = getSql()
   // Free-text address (and job number, for the times a reviewer knows the
   // job # rather than the address) search -- the landing page had zero
@@ -100,39 +116,43 @@ export default async function Home({
   // with a handful of inspections but not once every property GPM has ever
   // turned goes through here, including multiple inspections per property
   // over time.
-  const inspections = (
-    q
-      ? await sql`
-          select id, job_number, property_address, inspection_date, inspector_name, status
-          from inspections
-          where property_address ilike ${'%' + q + '%'} or job_number ilike ${'%' + q + '%'}
-          order by created_at desc
-        `
-      : await sql`
-          select id, job_number, property_address, inspection_date, inspector_name, status
-          from inspections
-          order by created_at desc
-        `
-  ) as unknown as InspectionRow[]
+  let where = sql``
+  if (q) where = sql`${where} and (property_address ilike ${'%' + q + '%'} or job_number ilike ${'%' + q + '%'})`
+  if (type) where = sql`${where} and inspection_type = ${type}`
+  const inspections = (await sql`
+    select id, job_number, property_address, inspection_date, inspector_name, status, inspection_type
+    from inspections
+    where true ${where}
+    order by created_at desc
+  `) as unknown as InspectionRow[]
 
   return (
     <AppShell active="/" title="Move-out inspections">
       <div className="flex items-center justify-between gap-2 px-4 md:px-6 py-4 border-b border-border flex-wrap">
-        <form method="get" className="flex items-center gap-2 flex-1 min-w-[200px] max-w-sm">
+        <form method="get" className="flex items-center gap-2 flex-1 min-w-[200px] max-w-lg flex-wrap">
           <input
             type="search"
             name="q"
             defaultValue={q ?? ''}
             placeholder="Search by address or job #…"
-            className="border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 w-full bg-surface text-[13px]"
+            className="border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 flex-1 min-w-[160px] bg-surface text-[13px]"
           />
+          <select
+            name="type"
+            defaultValue={type ?? 'All'}
+            className="border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 bg-surface text-[13px]"
+          >
+            <option value="All">All Types</option>
+            <option value="Move-Out">Move-Out</option>
+            <option value="Move-In">Move-In</option>
+          </select>
           <button
             type="submit"
             className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap"
           >
             Search
           </button>
-          {q && (
+          {(q || type) && (
             <Link href="/" className="text-[12px] text-accent underline decoration-accent/40 whitespace-nowrap">
               Clear
             </Link>
@@ -146,9 +166,11 @@ export default async function Home({
         </Link>
       </div>
 
-      {q && (
+      {(q || type) && (
         <div className="px-4 md:px-6 py-2 border-b border-border bg-surface-alt text-[12px] text-text-muted">
-          {inspections.length} result{inspections.length === 1 ? '' : 's'} for &quot;{q}&quot;
+          {inspections.length} result{inspections.length === 1 ? '' : 's'}
+          {q && <> for &quot;{q}&quot;</>}
+          {type && <> · type: {type}</>}
         </div>
       )}
 

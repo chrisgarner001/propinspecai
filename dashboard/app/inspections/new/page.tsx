@@ -15,6 +15,13 @@ export default async function NewInspectionPage() {
     <AppShell active="/" title="Add new inspection">
       <form action={createInspection} className="p-6 max-w-lg space-y-4">
         <div>
+          <label className={labelClass}>Inspection type</label>
+          <select name="inspection_type" defaultValue="Move-Out" className={inputClass}>
+            <option value="Move-Out">Move-Out</option>
+            <option value="Move-In">Move-In</option>
+          </select>
+        </div>
+        <div>
           <label className={labelClass}>Property address</label>
           <input name="property_address" required className={inputClass} />
         </div>

@@ -40,6 +40,31 @@ export function parseTimestampSeconds(raw: string): number | null {
   return end === null ? start : (start + end) / 2
 }
 
+// Reads the video's own creation_time from its container metadata (the real
+// wall-clock moment recording started) via ffmpeg's own metadata dump --
+// `ffmpeg -i <file>` with no output always exits non-zero ("At least one
+// output file must be specified") and prints its full metadata block to
+// stderr, so the error path is the actual data source here, not a failure.
+// Verified against two real GPM inspection videos (Samsung Android
+// recordings): creation_time is present and GPS/location metadata is not --
+// see docs/designs/propinspec-inspection-type-gallery.md's Technical
+// Finding. Returns null for any video lacking the tag (untested device,
+// corrupt file) rather than throwing -- callers treat a missing timestamp
+// the same way they already treat an unparsable source_timestamp.
+export async function getVideoCreationTime(videoPath: string): Promise<Date | null> {
+  if (!ffmpegPath) throw new Error('ffmpeg-static did not resolve a binary path')
+  let stderr = ''
+  try {
+    await execFileAsync(ffmpegPath, ['-i', videoPath])
+  } catch (err) {
+    stderr = (err as { stderr?: string }).stderr ?? ''
+  }
+  const match = stderr.match(/creation_time\s*:\s*(\S+)/)
+  if (!match) return null
+  const date = new Date(match[1])
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
 // Grabs one frame at `seconds` from an already-downloaded video file on disk.
 // Takes a file path (not the buffer) so the caller can write the video to
 // disk once and extract several frames from it, rather than re-writing the

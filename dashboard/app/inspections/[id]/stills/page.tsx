@@ -7,12 +7,13 @@ import ImageShareGallery from '@/app/components/ImageShareGallery'
 // "View Image Folder" -- every still frame extracted from this inspection's
 // video, in one gallery, since reviewing them one hover-preview at a time
 // from the line-item table (EvidenceStill) doesn't give a sense of the
-// whole set. Bordered frame + a mono caption bar per photo, not a plain
-// <img> lightbox, matching DESIGN.md's evidence-frame convention -- no GPS
-// data exists in this schema to put in the caption, so it carries Room/Item
-// instead, the identifying info that does exist.
+// whole set. Clicking a thumbnail opens ImageShareGallery's own in-page
+// lightbox (Prev/Next across the whole set) -- GPS is confirmed unrecoverable
+// from source video (docs/designs/propinspec-inspection-type-gallery.md),
+// but captured_at (the video's own creation_time + frame offset) is real and
+// renders in the lightbox caption.
 
-type StillRow = { id: string; room_area: string; item: string; still_image_file: string }
+type StillRow = { id: string; room_area: string; item: string; still_image_file: string; captured_at: string | null }
 
 export default async function InspectionStillsPage({ params }: { params: Promise<{ id: string }> }) {
   await requireSession()
@@ -23,7 +24,7 @@ export default async function InspectionStillsPage({ params }: { params: Promise
   if (!inspection) notFound()
 
   const stills = (await sql`
-    select id, room_area, item, still_image_file
+    select id, room_area, item, still_image_file, captured_at
     from line_items
     where inspection_id = ${id} and still_image_file is not null
     order by room_area, created_at

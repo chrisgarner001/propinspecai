@@ -62,6 +62,7 @@ vi.mock('@/lib/stills', () => ({
   parseTimestampSeconds: () => null,
   extractFrame: vi.fn(),
   uploadStill: vi.fn(),
+  getVideoCreationTime: vi.fn(async () => null),
 }))
 
 // Integration tests against the real dev Postgres (DATABASE_URL from

@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { parseFolderIdFromUrl, listVideosInFolder, downloadDriveFile } from '@/lib/google'
 import { extractLineItemsFromVideo } from '@/lib/gemini'
-import { parseTimestampSeconds, extractFrame, uploadStill } from '@/lib/stills'
+import { parseTimestampSeconds, extractFrame, uploadStill, getVideoCreationTime } from '@/lib/stills'
 import { askHelpAssistant, type HelpMessage } from '@/lib/helpAssistant'
 import { getPageContext } from '@/lib/helpContext'
 import { writeFile, unlink } from 'node:fs/promises'
@@ -361,7 +361,7 @@ export async function duplicateLineItem(id: string, inspectionId: string, _formD
       inspection_id, room_area, item, condition, observed_evidence, assigned_to,
       trade_category, recommended_action, priority, materials_cost, labor_hours,
       labor_cost, vendor_estimated_cost, tenant_charge, tenant_charge_amount, tenant_approved, is_manual_addition,
-      source_timestamp, source_video_file, source_video_drive_file_id, still_image_file, vendor_id,
+      source_timestamp, source_video_file, source_video_drive_file_id, still_image_file, captured_at, vendor_id,
       stage_id, supplier, sku, sku_quantity, created_at
     )
     values (
@@ -370,7 +370,7 @@ export async function duplicateLineItem(id: string, inspectionId: string, _formD
       ${original.recommended_action}, ${original.priority}, ${original.materials_cost},
       ${original.labor_hours}, ${original.labor_cost}, ${original.vendor_estimated_cost},
       ${original.tenant_charge}, ${original.tenant_charge_amount}, ${original.tenant_approved}, true,
-      ${original.source_timestamp}, ${original.source_video_file}, ${original.source_video_drive_file_id}, ${original.still_image_file},
+      ${original.source_timestamp}, ${original.source_video_file}, ${original.source_video_drive_file_id}, ${original.still_image_file}, ${original.captured_at},
       ${original.vendor_id}, ${original.stage_id}, ${original.supplier}, ${original.sku}, ${original.sku_quantity},
       ${original.created_at}::timestamptz + interval '1 millisecond'
     )
@@ -731,17 +731,18 @@ export async function createInspection(formData: FormData) {
   const moveInReportDriveUrl = String(formData.get('move_in_report_drive_url') || '') || null
   const leaseName = String(formData.get('lease_name') || '') || null
   const securityDepositAmount = toNumberOrNull(formData.get('security_deposit_amount'))
+  const inspectionType = String(formData.get('inspection_type') || 'Move-Out')
 
   const [row] = await sql`
     insert into inspections (
       job_number, property_address, inspection_date, inspector_name,
       source_video_drive_folder_url, special_instructions, move_in_report_drive_url,
-      lease_name, security_deposit_amount
+      lease_name, security_deposit_amount, inspection_type
     )
     values (
       ${jobNumber}, ${propertyAddress}, ${inspectionDate}, ${inspectorName},
       ${sourceVideoDriveFolderUrl}, ${specialInstructions}, ${moveInReportDriveUrl},
-      ${leaseName}, ${securityDepositAmount}
+      ${leaseName}, ${securityDepositAmount}, ${inspectionType}
     )
     returning id
   `
@@ -983,6 +984,10 @@ export async function processNextInspectionVideo(inspectionId: string): Promise<
       // some of these clips are 100s of MB.
       const videoTempPath = join(tmpdir(), `propinspec-video-${randomUUID()}.mp4`)
       await writeFile(videoTempPath, buffer)
+      // One creation_time per video, not per frame -- see getVideoCreationTime's
+      // own comment for why GPS isn't available but this is. Null on any
+      // video lacking the tag; captured_at then just stays null for its stills.
+      const creationTime = await getVideoCreationTime(videoTempPath).catch(() => null)
 
       try {
         for (const li of extracted) {
@@ -1007,7 +1012,8 @@ export async function processNextInspectionVideo(inspectionId: string): Promise<
             try {
               const frame = await extractFrame(videoTempPath, seconds)
               const url = await uploadStill(frame, `${lineItemId}.jpg`)
-              await sql`update line_items set still_image_file = ${url} where id = ${lineItemId}`
+              const capturedAt = creationTime ? new Date(creationTime.getTime() + seconds * 1000) : null
+              await sql`update line_items set still_image_file = ${url}, captured_at = ${capturedAt} where id = ${lineItemId}`
             } catch (stillErr) {
               console.error(`Still extraction failed for line item ${lineItemId}:`, (stillErr as Error).message)
             }
