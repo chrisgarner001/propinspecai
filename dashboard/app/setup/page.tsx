@@ -1,290 +1,76 @@
-import { getSql } from '@/lib/db'
 import { requireAdmin } from '@/lib/dal'
-import {
-  updateSettings,
-  createVendor,
-  deleteVendor,
-  createInspectionType,
-  deleteInspectionType,
-  createInspector,
-  deleteInspector,
-} from '@/app/actions'
 import AppShell from '@/app/components/AppShell'
 import Link from 'next/link'
-import DeleteInspectionButton from '@/app/components/DeleteInspectionButton'
 
 export const dynamic = 'force-dynamic'
 
-type Settings = {
-  gpm_labor_charge: string
-  material_markup_pct: string
-  vendor_markup_pct: string
-}
+// The old single mega-page (one giant form covering General Settings,
+// Vendors, Inspection Types, and Inspectors, plus link-outs to Stages/
+// Users/Cost Book) split into its own sub-pages, with this becoming a pure
+// intro + menu hub (user request, 2026-09-22: "create an introduction page
+// with instructions and a menu of the sub sections we have already") --
+// matches the pattern Stages/Users/Cost Book already used, just applied
+// consistently to every section instead of only some of them.
+const SECTIONS = [
+  {
+    href: '/setup/general',
+    title: 'General Settings',
+    description: 'GPM labor charge and material/vendor markup percentages used across every inspection.',
+  },
+  {
+    href: '/setup/vendors',
+    title: 'Vendors',
+    description: 'Outside vendors available in the Assigned To picker on inspections.',
+  },
+  {
+    href: '/setup/inspection-types',
+    title: 'Inspection Types',
+    description: 'The catalog behind the Inspection Type picker on Add New Inspection (Move-Out, Move-In, and any others added).',
+  },
+  {
+    href: '/setup/inspectors',
+    title: 'Inspectors',
+    description: 'The catalog behind the Inspector dropdown on Add New Inspection.',
+  },
+  {
+    href: '/setup/stages',
+    title: 'Stages',
+    description: 'The rehab/turn stages used on the Quote Sheet and Dispatch Board, and their display order.',
+  },
+  {
+    href: '/setup/users',
+    title: 'Users',
+    description: 'Dashboard accounts and their access level (Admin / General User).',
+  },
+  {
+    href: '/cost-book',
+    title: 'Cost Book',
+    description: 'Reference pricing for materials and labor. Also on the main menu — kept here too for API/data-upload setup as that lands.',
+  },
+]
 
-type Vendor = { id: string; name: string; in_use: boolean }
-type InspectionType = { id: string; name: string; in_use: boolean }
-type Inspector = { id: string; name: string; in_use: boolean }
-
-const fieldClass = 'data-mono border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 w-40 bg-surface'
-const labelClass = 'font-medium'
-const helpClass = 'text-[12px] text-text-muted mt-1'
-
-export default async function SetupPage() {
+export default async function SystemConfigPage() {
   await requireAdmin()
-  const sql = getSql()
-  const [settings] = (await sql`select * from settings where id = true`) as unknown as Settings[]
-  const vendors = (await sql`
-    select
-      v.id,
-      v.name,
-      exists(select 1 from line_items li where li.vendor_id = v.id) as in_use
-    from vendors v
-    order by v.name
-  `) as unknown as Vendor[]
-  const inspectionTypes = (await sql`
-    select
-      t.id,
-      t.name,
-      exists(select 1 from inspections i where i.inspection_type = t.name) as in_use
-    from inspection_types t
-    order by (t.name = 'Move-Out') desc, t.name
-  `) as unknown as InspectionType[]
-  const inspectors = (await sql`
-    select
-      i.id,
-      i.name,
-      exists(select 1 from inspections ins where ins.inspector_name = i.name) as in_use
-    from inspectors i
-    order by i.name
-  `) as unknown as Inspector[]
 
   return (
-    <AppShell active="/setup" title="Set Up">
-      <form action={updateSettings} className="p-4 md:p-6 max-w-xl space-y-6">
-        <div className="flex items-center justify-between flex-wrap gap-3 md:gap-6 pb-4 border-b border-border">
-          <div>
-            <div className={labelClass}>GPM Labor Charge</div>
-            <div className={helpClass}>Default per-hour labor charge for GPM staff-performed work.</div>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-text-muted">$</span>
-            <input
-              name="gpm_labor_charge"
-              type="number"
-              step="0.25"
-              defaultValue={settings.gpm_labor_charge}
-              className={fieldClass}
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between flex-wrap gap-3 md:gap-6 pb-4 border-b border-border">
-          <div>
-            <div className={labelClass}>General Material Markup</div>
-            <div className={helpClass}>Percentage added on top of material cost when charged out.</div>
-          </div>
-          <div className="flex items-center gap-1">
-            <input
-              name="material_markup_pct"
-              type="number"
-              step="1"
-              defaultValue={settings.material_markup_pct}
-              className={fieldClass}
-            />
-            <span className="text-text-muted">%</span>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between flex-wrap gap-3 md:gap-6 pb-4 border-b border-border">
-          <div>
-            <div className={labelClass}>Vendor Markup</div>
-            <div className={helpClass}>Percentage added on top of outside vendor estimates when charged out.</div>
-          </div>
-          <div className="flex items-center gap-1">
-            <input
-              name="vendor_markup_pct"
-              type="number"
-              step="1"
-              defaultValue={settings.vendor_markup_pct}
-              className={fieldClass}
-            />
-            <span className="text-text-muted">%</span>
-          </div>
-        </div>
-
-        <button
-          type="submit"
-          className="bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-4 py-2 text-[13px] font-semibold"
-        >
-          Save settings
-        </button>
-      </form>
-
-      <div className="p-4 md:p-6 max-w-xl border-t border-border">
-        <div className={labelClass}>Vendors</div>
-        <div className={`${helpClass} mb-3`}>Outside vendors available in the Assigned To picker on inspections.</div>
-        {vendors.length > 0 && (
-          <ul className="mb-4 space-y-1">
-            {vendors.map((v) => (
-              <li key={v.id} className="flex items-center justify-between gap-2 text-[13px]">
-                <span className="text-text-muted">{v.name}</span>
-                {v.in_use ? (
-                  <span className="text-[11px] text-text-muted italic" title="Assigned on at least one line item or batch">
-                    In use
-                  </span>
-                ) : (
-                  <DeleteInspectionButton
-                    action={deleteVendor.bind(null, v.id)}
-                    confirmMessage={`Delete vendor "${v.name}"? This cannot be undone.`}
-                  />
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        <form action={createVendor} className="flex items-end gap-2">
-          <div className="flex-1">
-            <label className="block text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1">
-              Vendor Name
-            </label>
-            <input
-              name="name"
-              required
-              className="border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 w-full bg-surface"
-            />
-          </div>
-          <button
-            type="submit"
-            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-2 text-[12px] font-semibold"
+    <AppShell active="/setup" title="System Config">
+      <div className="px-4 md:px-6 pt-5 pb-2 max-w-2xl">
+        <p className="text-[13px] text-text-muted">
+          Admin-only configuration for the whole app — reference catalogs (Vendors, Inspection Types, Inspectors,
+          Stages), pricing defaults, user accounts, and the Cost Book. Pick a section below.
+        </p>
+      </div>
+      <div className="px-4 md:px-6 py-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {SECTIONS.map((s) => (
+          <Link
+            key={s.href}
+            href={s.href}
+            className="border border-border rounded-[var(--radius-md)] p-4 hover:border-accent hover:bg-surface-alt"
           >
-            Create New Vendor
-          </button>
-        </form>
-      </div>
-
-      <div className="p-4 md:p-6 max-w-xl border-t border-border">
-        <div className={labelClass}>Inspection Types</div>
-        <div className={`${helpClass} mb-3`}>
-          Available on Add New Inspection. &quot;Move-Out&quot; can&apos;t be deleted — the Quote Sheet, Tenant
-          Chargeback Review, and Move-Out Report only ever show for that exact type.
-        </div>
-        {inspectionTypes.length > 0 && (
-          <ul className="mb-4 space-y-1">
-            {inspectionTypes.map((t) => (
-              <li key={t.id} className="flex items-center justify-between gap-2 text-[13px]">
-                <span className="text-text-muted">{t.name}</span>
-                {t.name === 'Move-Out' ? (
-                  <span className="text-[11px] text-text-muted italic">Required</span>
-                ) : t.in_use ? (
-                  <span className="text-[11px] text-text-muted italic" title="Used by at least one inspection">
-                    In use
-                  </span>
-                ) : (
-                  <DeleteInspectionButton
-                    action={deleteInspectionType.bind(null, t.id)}
-                    confirmMessage={`Delete inspection type "${t.name}"? This cannot be undone.`}
-                  />
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        <form action={createInspectionType} className="flex items-end gap-2">
-          <div className="flex-1">
-            <label className="block text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1">
-              Type Name
-            </label>
-            <input
-              name="name"
-              required
-              placeholder="e.g. Condition Check"
-              className="border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 w-full bg-surface"
-            />
-          </div>
-          <button
-            type="submit"
-            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-2 text-[12px] font-semibold"
-          >
-            Add Type
-          </button>
-        </form>
-      </div>
-
-      <div className="p-4 md:p-6 max-w-xl border-t border-border">
-        <div className={labelClass}>Inspectors</div>
-        <div className={`${helpClass} mb-3`}>
-          Available in the Inspector dropdown on Add New Inspection — typing a new name there still works too.
-        </div>
-        {inspectors.length > 0 && (
-          <ul className="mb-4 space-y-1">
-            {inspectors.map((i) => (
-              <li key={i.id} className="flex items-center justify-between gap-2 text-[13px]">
-                <span className="text-text-muted">{i.name}</span>
-                {i.in_use ? (
-                  <span className="text-[11px] text-text-muted italic" title="Used by at least one inspection">
-                    In use
-                  </span>
-                ) : (
-                  <DeleteInspectionButton
-                    action={deleteInspector.bind(null, i.id)}
-                    confirmMessage={`Delete inspector "${i.name}"? This cannot be undone.`}
-                  />
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        <form action={createInspector} className="flex items-end gap-2">
-          <div className="flex-1">
-            <label className="block text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1">
-              Inspector Name
-            </label>
-            <input
-              name="name"
-              required
-              className="border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 w-full bg-surface"
-            />
-          </div>
-          <button
-            type="submit"
-            className="bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-2 text-[12px] font-semibold"
-          >
-            Add Inspector
-          </button>
-        </form>
-      </div>
-
-      <div className="p-4 md:p-6 max-w-xl border-t border-border">
-        <div className={labelClass}>Stages</div>
-        <div className={`${helpClass} mb-3`}>The rehab/turn stages used on the Quote Sheet and Job Timeline, and their display order.</div>
-        <Link
-          href="/setup/stages"
-          className="inline-block bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-2 text-[13px] font-semibold"
-        >
-          Manage Stages
-        </Link>
-      </div>
-
-      <div className="p-4 md:p-6 max-w-xl border-t border-border">
-        <div className={labelClass}>Cost Book</div>
-        <div className={`${helpClass} mb-3`}>Reference pricing for materials and labor used across inspections.</div>
-        <Link
-          href="/cost-book"
-          className="inline-block bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-2 text-[13px] font-semibold"
-        >
-          Open Cost Book
-        </Link>
-      </div>
-
-      <div className="p-4 md:p-6 max-w-xl border-t border-border">
-        <div className={labelClass}>Users</div>
-        <div className={`${helpClass} mb-3`}>Dashboard accounts and their access level (Admin / General User).</div>
-        <Link
-          href="/setup/users"
-          className="inline-block bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-2 text-[13px] font-semibold"
-        >
-          Manage Users
-        </Link>
+            <div className="font-display font-bold text-[14px]">{s.title}</div>
+            <div className="text-[12px] text-text-muted mt-1">{s.description}</div>
+          </Link>
+        ))}
       </div>
     </AppShell>
   )

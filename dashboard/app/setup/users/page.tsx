@@ -19,7 +19,7 @@ export default async function ManageUsersPage() {
   `) as unknown as User[]
 
   return (
-    <AppShell active="/setup" title="Set Up — Manage Users">
+    <AppShell active="/setup" title="System Config — Manage Users">
       <div className="p-4 md:p-6 max-w-xl">
         <div className="font-medium">Users</div>
         <div className="text-[12px] text-text-muted mt-1 mb-3">

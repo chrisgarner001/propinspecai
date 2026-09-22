@@ -11,7 +11,8 @@ const NAV_ITEMS = [
   { href: '/inspections', label: 'Inspections' },
   { href: '/properties', label: 'Properties' },
   { href: '/dispatch-board', label: 'Dispatch Board' },
-  { href: '/setup', label: 'Set Up' },
+  { href: '/cost-book', label: 'Cost Book' },
+  { href: '/setup', label: 'System Config' },
 ]
 
 function BrandLockup({ compact = false }: { compact?: boolean }) {

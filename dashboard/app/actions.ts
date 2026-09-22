@@ -851,7 +851,7 @@ export async function createInspectionType(formData: FormData) {
 
   await sql`insert into inspection_types (name) values (${name}) on conflict (name) do nothing`
 
-  revalidatePath('/setup')
+  revalidatePath('/setup/inspection-types')
 }
 
 // "Move-Out" is never deletable -- every non-Move-Out gating check across
@@ -869,7 +869,7 @@ export async function deleteInspectionType(typeId: string) {
   } catch (err) {
     console.error('deleteInspectionType failed (likely still in use):', err)
   }
-  revalidatePath('/setup')
+  revalidatePath('/setup/inspection-types')
 }
 
 // A convenience catalog for the Inspector dropdown on Add New Inspection --
@@ -883,14 +883,14 @@ export async function createInspector(formData: FormData) {
 
   await sql`insert into inspectors (name) values (${name}) on conflict (name) do nothing`
 
-  revalidatePath('/setup')
+  revalidatePath('/setup/inspectors')
 }
 
 export async function deleteInspector(inspectorId: string) {
   await requireAdminOrThrow()
   const sql = getSql()
   await sql`delete from inspectors where id = ${inspectorId}`
-  revalidatePath('/setup')
+  revalidatePath('/setup/inspectors')
 }
 
 export async function createVendor(formData: FormData) {
@@ -901,7 +901,7 @@ export async function createVendor(formData: FormData) {
 
   await sql`insert into vendors (name) values (${name}) on conflict (name) do nothing`
 
-  revalidatePath('/setup')
+  revalidatePath('/setup/vendors')
 }
 
 // Setup page only offers Delete on a vendor with zero references (see the
@@ -916,7 +916,7 @@ export async function deleteVendor(vendorId: string) {
   } catch (err) {
     console.error('deleteVendor failed (likely still in use):', err)
   }
-  revalidatePath('/setup')
+  revalidatePath('/setup/vendors')
 }
 
 export async function createStage(formData: FormData) {
@@ -999,7 +999,7 @@ export async function updateSettings(formData: FormData) {
     where id = true
   `
 
-  revalidatePath('/setup')
+  revalidatePath('/setup/general')
 }
 
 export type InspectionVideoRow = {

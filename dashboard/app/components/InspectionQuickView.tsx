@@ -55,7 +55,7 @@ export default function InspectionQuickView({
           }}
         >
           <div
-            className="bg-surface border border-border rounded-[var(--radius-lg)] w-full max-w-3xl h-[85vh] flex flex-col overflow-hidden"
+            className="bg-surface border border-border rounded-[var(--radius-lg)] w-full max-w-6xl h-[94vh] flex flex-col overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">

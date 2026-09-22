@@ -172,7 +172,7 @@ export default async function CostBookPage({
   const vendorCols = 'grid-cols-1 md:grid-cols-[1.1fr_1.4fr_0.8fr_1fr_1.6fr_0.6fr]'
 
   return (
-    <AppShell active="/setup" title="Cost Book">
+    <AppShell active="/cost-book" title="Cost Book">
       <p className="px-4 md:px-6 pt-5 text-[13px] text-text-muted max-w-2xl">
         GPM&apos;s reference pricing. Vendor estimates are placeholders only, used until a real vendor quote comes
         in for a specific job.
