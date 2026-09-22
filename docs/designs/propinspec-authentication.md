@@ -18,15 +18,15 @@ One data point surfaced this session: David at Epic Property Management (same se
 Zero enforcement. "Staff-only" access is a UI convention, not a boundary — a hardcoded `reviewerName` prop that used to exist (noted in TODOS.md 2026-09-11) has since been removed from the codebase with nothing replacing it. Today, knowing the Vercel URL is the only "credential" needed for full read/write access to the app.
 
 ## Target User & Narrowest Wedge
-Target: GPM staff who have or will have a Manage Users record (Jessica, Angel, Courtney, and whoever Chris adds next). Narrowest wedge confirmed this session: a signed session cookie plus a Next.js middleware route guard, single-tenant (no org/tenant model) — every logged-in user still sees the same GPM data they see today. Admin vs. General User gates a small number of routes (proposed: Setup, Cost Book, Manage Users — see Open Questions for the exact list, still pending confirmation), not per-action permissions.
+Target: GPM staff who have or will have a Manage Users record (Jessica, Angel, Courtney, and whoever Chris adds next). Narrowest wedge confirmed this session: a signed session cookie, an optimistic `proxy.ts` redirect, and a Data Access Layer enforcing the real check (see Approach A) — single-tenant (no org/tenant model), every logged-in user still sees the same GPM data they see today. Admin vs. General User gates a small number of routes (proposed: Setup, Cost Book, Manage Users — see Open Questions for the exact list, still pending confirmation), not per-action permissions.
 
 ## Constraints
 - Reuse the `users` table and bcrypt hashing already built this session (Premise 2) — not replaced by a third-party auth service.
 - No org/tenant model (Premise 1) — multi-tenant shape deferred until real external demand clears the existing gate.
 - No vendor-facing login (Premise 3) — unchanged from the 2026-09-11 doc.
-- Next.js 16.3.4 App Router; the `postgres` npm client is not Edge-runtime-compatible; deployed on Vercel.
+- Next.js 16.3.4 App Router, deployed on Vercel. (Corrected during /plan-eng-review: an earlier draft of this doc assumed Proxy/Middleware runs on the Edge runtime, which is not compatible with the `postgres` npm client. Verified against Next.js's own current docs — Proxy runs on the **Node.js runtime by default** in Next.js 16, so this is not actually a constraint. See Approach A below for what changed as a result.)
 - Must not break the AI Help Widget or any of the ~35+ existing Server Actions.
-- `/share/[token]` (`app/share/[token]/page.tsx`) must stay publicly reachable, unauthenticated — it's the tenant-facing photo-share link (its own code comment: "Public, unauthenticated view"), gated by its random token, not by login. The middleware matcher must explicitly exclude it, or the tenant-facing share feature breaks.
+- `/share/[token]` (`app/share/[token]/page.tsx`) must stay publicly reachable, unauthenticated — it's the tenant-facing photo-share link (its own code comment: "Public, unauthenticated view"), gated by its random token, not by login. Both `app/proxy.ts`'s matcher and the `app/(app)/layout.tsx` route group must explicitly exclude it, or the tenant-facing share feature breaks.
 
 ## Premises
 1. Auth ships single-tenant (GPM only) — no org/tenant model, no per-company data isolation. Multi-tenant shape is deferred until real external demand (2-3 outside operators, unchanged bar from 2026-09-11) actually commits. **AGREED.**
@@ -35,16 +35,62 @@ Target: GPM staff who have or will have a Manage Users record (Jessica, Angel, C
 
 ## Approaches Considered
 
-### Approach A: Minimal signed-cookie session (CHOSEN)
-On login, verify email+password against the existing `users` table (`bcrypt.compare`), issue a signed, httpOnly cookie carrying `{userId, role, exp}` — signed via **`jose`**, HS256, with an `AUTH_SECRET` env var (32+ random bytes, generated once, set in Vercel project settings) as the signing key (chosen over hand-rolled `crypto`: `jose` is small, well-audited, and Edge-compatible, which this design already depends on). Cookie flags: `httpOnly; Secure; SameSite=Lax` — `SameSite=Lax` plus Next.js's own built-in Server Action Origin-header check is the CSRF mitigation here; no separate CSRF token is needed. No session table needed. `middleware.ts` verifies the cookie's signature on every request: missing/invalid → redirect to `/login`; valid but `role !== 'Admin'` on an admin-only path → redirect home. Logout clears the cookie. The middleware `matcher` protects all paths except `/login`, `/share/*`, and static assets — this exclusion list needs to be verified against every existing route before shipping, not assumed: all ~35+ Server Action call sites (a Server Action posts back to its originating page's route, so page coverage carries it); and, separately, 5 existing `route.ts` Route Handlers that are NOT Server Actions and don't ride along with any page (`app/inspections/[id]/export/route.ts`, `.../move-out-report/route.ts`, `.../quote-sheet/pdf/route.ts`, `.../quote-sheet/materials-order/pdf/route.ts`, `.../quote-sheet/stages/[batchNumber]/pdf/route.ts`) — these are plain `GET` handlers that query the database directly and serve exactly the tenant/chargeback/move-out data this doc exists to protect, so they need their own explicit matcher-coverage check, not just the "no `app/api/` directory" check that would miss them entirely. This sidesteps the Edge-runtime-vs-`postgres`-package incompatibility entirely, since middleware never touches the database — the cookie signature is the only check.
+### Approach A: Signed cookie for optimistic routing + a Data Access Layer for real enforcement (CHOSEN)
+**Corrected during /plan-eng-review** against Next.js's own current docs (updated 2026-08-25 for this exact 16.3.5/16.3.4 line) — this replaces the original single-layer design below, which rested on a now-incorrect Edge-runtime assumption. The corrected architecture is Next.js's own documented pattern, not a custom invention:
 
-A cookie's `role` claim is fixed at login time. If Chris changes someone's role in Manage Users, that change won't take effect until the affected user logs out and back in (or the cookie expires). Accepted as consistent with the stateless design — not fixed by this doc.
+```
+                    ┌─────────────────────┐
+  browser  ───POST──▶  login action        │  bcrypt.compare vs users table
+  (form)              │  (app/actions.ts)   │  on success: lib/session.ts
+                    └──────────┬──────────┘  encrypt() -> Set-Cookie
+                               │ redirect
+                               ▼
+            ┌──────────────────────────────────────┐
+  every  ───▶       app/proxy.ts  (optimistic)       │  cookie present + signature OK?
+  request │       lib/session.ts decrypt()            │  role check for /setup/*, /cost-book
+          └───────┬───────────────────────┬──────────┘
+     no/invalid │                         │ valid
+    cookie      ▼                         ▼
+          redirect /login          NextResponse.next()
+                                           │
+                    ┌──────────────────────┼──────────────────────┐
+                    ▼                      ▼                      ▼
+          app/(app)/layout.tsx    Server Action           route.ts handler
+          (page renders)          (app/actions.ts,        (5: export, pdf,
+                                    cost-book/actions.ts)   move-out-report, ...)
+                    │                      │                      │
+                    └──────────┬───────────┴──────────┬───────────┘
+                               ▼                       ▼
+                    lib/dal.ts verifySession()  (cache()-wrapped, one per request)
+                    ├─ decrypt cookie (lib/session.ts) -- fails closed on any error
+                    ├─ live SELECT against users table -- fresh role, row-still-exists
+                    └─ 10 admin-only actions additionally check role === 'Admin' here
+                               │
+                    reject (no mutation/render) ◀──── any failure, any reason
+                               │
+                          proceed normally
+```
+
+This is the diagram worth keeping near `lib/dal.ts` in code once implemented — it's the one place that shows why a Proxy-layer gap degrades to a redirect miss, not a security bypass: every path below the fork still runs through `verifySession()` independently.
+
+1. **Login:** verify email+password against the existing `users` table (`bcrypt.compare`), issue a signed, httpOnly cookie carrying `{userId, role, exp}` via **`jose`**, HS256, with an `AUTH_SECRET` env var (32+ random bytes, generated once, set in Vercel project settings). Cookie flags: `httpOnly; Secure; SameSite=Lax` — `SameSite=Lax` plus Next.js's own built-in Server Action Origin-header check is the CSRF mitigation; no separate CSRF token needed. Logout clears the cookie. **Fail closed on a missing `AUTH_SECRET`:** the signing/verification module throws at first use if the env var is unset, the same pattern `lib/db.ts` already uses for `DATABASE_URL` ("`DATABASE_URL is not set`") — never silently produce an unsigned or unverifiable session. **Fail closed on any `verifySession()` error, too:** a database failure during the live check (connection drop, timeout) must abort the Server Action or Route Handler the same as "not logged in" — never fall back to trusting the cookie's signature alone, which would silently downgrade every request to the weaker optimistic-only check during a DB outage with no signal that revocation stopped being enforced. (Both found and resolved during /plan-eng-review's Architecture pass.)
+2. **`app/proxy.ts`** (Next.js 16 renamed `middleware.ts` → `proxy.ts`, function `proxy` not `middleware` — this doc originally used the old name throughout) does an **optimistic-only** check: decrypt the cookie, redirect to `/login` if missing/invalid, redirect a General User away from admin-only paths. No database call here — not because Proxy can't reach the database (it runs on the Node.js runtime by default in Next.js 16, so `postgres` works fine), but because Proxy runs on *every* route including prefetches, and a DB round-trip there would be wasted work most of the time. This is Next.js's own stated reason, not a technical limitation.
+3. **`lib/dal.ts`** (a Data Access Layer): `verifySession()`, wrapped in **React's `cache()`** (`export const verifySession = cache(async () => {...})`, matching Next.js's own DAL example exactly — found and named explicitly during /plan-eng-review's Performance pass, since "cached" without naming the mechanism risks a real N+1-style double DB check if two of the ~40 call sites end up calling each other within one request) — decrypts the cookie **and** does a live check against the `users` table, returning the user's **fresh, current DB role** (not the cookie's stale `role` claim) — called explicitly at the top of every Server Action (`app/actions.ts`, `app/cost-book/actions.ts`) and every Route Handler (the 5 `route.ts` files below). This is the actual security boundary, per Next.js's own guidance: *"Proxy... should not be your only line of defense... security checks should be performed as close as possible to your data source."* A matcher gap in step 2 degrades UX (no redirect), it does not bypass step 3 — every Server Action and Route Handler checks for itself.
+4. **`app/(app)/layout.tsx`** (found during /plan-eng-review's Outside Voice pass — a real gap the 4-section review missed): a route-group layout wrapping every page except `/login` and `/share/[token]`, calling the same cached `verifySession()` once per request. This closes the actual read-access hole the Problem Statement opens with — 11 `page.tsx` files fetch data directly via `getSql()` in the Server Component itself (`app/page.tsx`, `app/cost-book/page.tsx`, `app/dispatch-board/page.tsx`, `app/inspections/[id]/page.tsx`, `.../chargeback-review/page.tsx`, `.../quote-sheet/page.tsx`, `.../quote-sheet/stages/page.tsx`, `.../stills/page.tsx`, `app/setup/page.tsx`, `app/setup/stages/page.tsx`, `app/setup/users/page.tsx`), and without this layer they'd rely solely on `proxy.ts`'s optimistic, cookie-only redirect — meaning a demoted/deleted user keeps full read access to chargeback amounts, vendor costs, and inspection data (exactly this doc's opening scenario) until their cookie expires, not instantly. **Performance caveat, stated explicitly rather than left silent:** Next.js layouts can render during route prefetch, so this reintroduces some of the per-navigation DB-check cost that was the reason `proxy.ts` stays optimistic-only. A non-issue at 3-10 users; would need reconsidering if the user base ever grows enough for prefetch volume to matter.
+
+**DRY note (found during /plan-eng-review's Code Quality pass):** the cookie's `jose` encrypt/decrypt/verify logic must live in exactly one place — a new `lib/session.ts` (matching Next.js's own official example naming) exporting `encrypt()`/`decrypt()`. `app/proxy.ts`'s optimistic check, `lib/dal.ts`'s `verifySession()`, and the layout above all import from it; none reimplements the `jose` calls independently. Two copies of this logic is the real risk to avoid — an algorithm or secret-handling change made in one place and missed in the other.
+
+**Admin-only actions must check role themselves, not just rely on their page being gated (found during /plan-eng-review, expanded after the Outside Voice pass caught 6 more):** these are Server Actions — independently callable endpoints, not tied to which page rendered the button that calls them. A logged-in General User could invoke one directly (e.g. replaying the request) even though `/setup/*` itself redirects them away in the browser. All 10 of the following must call `verifySession()` and explicitly check the returned `role === 'Admin'`, rejecting otherwise — matching Next.js's own official Server Actions example for this exact scenario: `createUser`, `deleteUser`, `deleteVendor`, the `cost-book` create/update actions (originally named), plus `createStage`, `updateStageName`, `moveStageUp`, `moveStageDown`, `updateSettings`, `createVendor` (verified via grep: called exclusively from `app/setup/page.tsx` and `app/setup/stages/page.tsx`, both inside the same Admin-only scope, but missing from the original list of 4 — the exact "verify by grep, don't assume the count stays at 5" discipline this doc asks of implementers elsewhere, that its own first draft didn't apply to itself).
+
+This structurally fixes the biggest open compromise in the original draft: because `verifySession()` runs inside the DAL (not inside Proxy), a live DB check there is cheap — it only runs on real mutations/data reads and page renders behind the new layout, never on prefetches at the Proxy layer. **Revocation is therefore instant** across both reads and writes, not bounded by a 14-day cookie expiry: delete or demote a user in Manage Users, and their very next Server Action, Route Handler, or page render is rejected. This removes the Revocation and (mostly) the Session Lifetime open questions below.
+
+Every existing Route Handler needs to route through `verifySession()`: `app/inspections/[id]/export/route.ts`, `.../move-out-report/route.ts`, `.../quote-sheet/pdf/route.ts`, `.../quote-sheet/materials-order/pdf/route.ts`, `.../quote-sheet/stages/[batchNumber]/pdf/route.ts` — verify by grep at implementation time, don't assume the count stays at 5.
 
 Until a self-serve reset flow exists, a forgotten password is reset by Chris directly via the `users` table (an `UPDATE` with a freshly bcrypt-hashed value) — not a gap, an accepted manual interim for a 3-10 person user base.
 
-Effort: S (human: ~1 day / CC: ~1-2 hours). Risk: Low-Med.
-Pros: reuses 100% of this session's work; zero heavy new dependencies; matches the exact wedge already picked.
-Cons: no password-reset/email-verification flow (mitigated above); revocation before cookie expiry needs a short max-age, not instant by default (see Open Questions).
+Effort: S-M (human: ~1.5-2 days / CC: ~3-4 hours — the DAL adds real but small work: `lib/session.ts` + `lib/dal.ts` + `app/(app)/layout.tsx`, one `verifySession()` call added to each of ~40 Server Action/Route Handler call sites, and a role check added to 10 admin-only actions. Revised up from the original 1-day estimate after the Outside Voice pass caught the page-read gap and 6 missed admin actions — both cheap individually, but real work, not a rounding error). Risk: Low.
+Pros: reuses 100% of this session's work; matches Next.js's own current documented pattern instead of a custom, harder-to-verify design; real instant revocation; defense-in-depth (Proxy gap ≠ total bypass).
+Cons: more call sites to touch than the original single-layer design (one `verifySession()` import per Server Action/Route Handler, not just one check in Proxy); no password-reset/email-verification flow (mitigated above).
 Reuses: `users` table, bcrypt hashing.
 
 ### Approach B: Auth.js (NextAuth v5) Credentials provider (REJECTED for now)
@@ -57,29 +103,155 @@ Rejected because: the flexibility it buys (OAuth providers, magic links, multi-p
 Would mean abandoning the `users` table and bcrypt hashes just built, forcing every account through a password reset with no offsetting benefit. Ruled out by Premise 2 before reaching a full comparison.
 
 ## Recommended Approach
-Approach A. It's the exact wedge already chosen, ships in about a day, reuses everything built this session, and adds no dependency footprint beyond one small, well-audited cookie-signing library.
+Approach A. It's the exact wedge already chosen, reuses everything built this session, adds no dependency footprint beyond one small well-audited cookie-signing library, and — after the /plan-eng-review correction — matches Next.js's own current documented pattern with real instant revocation instead of the original draft's 14-day-exposure compromise.
 
 ## Open Questions
 - **Admin-only route list (proposed default, pending confirmation):** `/setup/*` (including `/setup/users`, `/setup/stages`) and `/cost-book`. Confirm before implementation — should Dispatch Board or anything else also be Admin-only? The Success Criteria below assumes this default; update both together if it changes.
-- **Session lifetime:** proposed 14 days, **no silent renewal** — the cookie's `exp` is fixed at login and never pushed forward. (An earlier draft of this doc proposed silent renewal on activity; dropped because it breaks the revocation bound below — a renewing cookie held by an active session, malicious or not, would never actually hit the 14-day wall.) A user simply re-logs in every 14 days. Confirm this tradeoff (mild recurring friction) is acceptable, or explicitly choose renewal-with-an-absolute-ceiling instead (e.g., renews on activity but never beyond 30 days from original login) and update the Revocation bound below to match.
-- **Revocation:** deleting or demoting a user in Manage Users won't invalidate their existing cookie until it expires — this is a direct consequence of the stateless design (Approach A was chosen specifically so middleware never hits the database, which a live revocation check would require, reintroducing the Edge-runtime-vs-`postgres` conflict this design avoids). Resolution: accept stateless-only revocation, with the fixed (non-renewing) 14-day expiry above as the actual, real worst-case bound on exposure — including for an actively-used stolen or post-deletion cookie, since nothing extends it. If immediate revocation ever becomes a real requirement, it needs either a Node-runtime middleware config (verify this is actually available and stable on Next.js 16.3.4 before relying on it) or a separate Edge-compatible revocation store (e.g., a small KV-backed denylist) — not scoped in this doc.
+- **Session lifetime:** now a minor question, not a security tradeoff — since `verifySession()`'s live DB check gives real revocation regardless of cookie expiry (see Approach A), the cookie `exp` just controls how often someone has to log back in. Proposed: 30 days, with silent renewal on activity (safe now, since an actively-used session is re-verified against the database on every real action anyway — the earlier objection to renewal, that it would extend a revoked session's exposure window, no longer applies). Confirm the 30-day figure; anything reasonable works.
+- **Revocation: RESOLVED** by the Approach A correction above — deleting or demoting a user in Manage Users takes effect on that user's very next Server Action, Route Handler, or page render (via the new `app/(app)/layout.tsx`), through the DAL's live database check. No longer an open question.
 - **Rate limiting:** no brute-force protection on `/login` is specced. Given the tiny, known user base (3-10 accounts), propose deferring this explicitly rather than leaving it silently unaddressed — revisit if the app ever becomes internet-discoverable beyond "knows the URL."
-- **Bootstrap path:** once middleware ships, `/setup/users` itself becomes gated — who adds the very first admin account? Needs either a one-time seed script or an initial account created directly in the database before the gate goes live.
+- **Bootstrap path:** once `proxy.ts` ships, `/setup/users` itself becomes gated — who adds the very first admin account? Needs either a one-time seed script or an initial account created directly in the database before the gate goes live.
 
 ## Success Criteria
-- An unauthenticated request to any page or server action can't do anything (actions fail without a session; pages redirect to `/login`).
+- An unauthenticated request to any page, Server Action, or Route Handler can't do anything (actions/handlers reject without a valid session; pages redirect to `/login` via `app/(app)/layout.tsx`, not just via `proxy.ts`'s optimistic check).
+- An unauthenticated visitor cannot read tenant chargeback amounts, vendor costs, or inspection data by directly loading a page's URL — this is the doc's actual opening threat scenario; test it against a real page render, not just Server Actions.
 - A General User cannot reach `/setup`, `/setup/users`, `/setup/stages`, or `/cost-book` — redirected home instead (assumes the proposed default admin-route list above; update this line if that list changes).
+- A General User's direct call to any of the 10 admin-only Server Actions (`createUser`, `deleteUser`, `deleteVendor`, cost-book create/update, `createStage`, `updateStageName`, `moveStageUp`, `moveStageDown`, `updateSettings`, `createVendor`) is rejected by that action's own `verifySession()` role check — not just by the page being gated. Test this by calling each action directly, not just by navigating the UI.
 - `/share/[token]` remains reachable without a session — verify this explicitly, not just by omission.
-- Every existing Server Action call site (`app/actions.ts` and any per-feature `actions.ts` files, e.g. `app/cost-book/actions.ts`) AND every standalone `route.ts` Route Handler anywhere under `app/` (5 exist today, all PDF/export endpoints under `app/inspections/[id]/...` — grep for `route.ts`, don't assume the count stays at 5) is covered by the middleware matcher — verify by grep, not by assumption, given the stated app-wide-outage stakes.
+- Every existing Server Action call site (`app/actions.ts` and any per-feature `actions.ts` files, e.g. `app/cost-book/actions.ts`), every standalone `route.ts` Route Handler anywhere under `app/` (5 exist today, all PDF/export endpoints under `app/inspections/[id]/...` — grep for `route.ts`, don't assume the count stays at 5), AND every `page.tsx` that reads via `getSql()` directly (11 exist today — grep for `getSql()` in `page.tsx` files, don't assume the count stays at 11) is covered — verify by grep, not by assumption. This is the real boundary now (see Approach A); `proxy.ts`'s matcher is a UX nicety, not the last line of defense, but should still be checked for the pages it's meant to redirect.
+- Deleting or demoting a user in Manage Users blocks their very next Server Action, Route Handler, or page render — this is the concrete, testable version of "revocation is instant."
+- A missing `AUTH_SECRET` env var fails the app at startup, not silently per-request. A `verifySession()` database error aborts the calling action/handler, never falls back to trusting the cookie alone.
 - Login works end-to-end for a real Manage Users record: correct email/password reaches the app; wrong password is rejected with a clear message; logout actually clears the session.
-- No regression across the whole app — middleware touches every route, so this needs a full pass, not a spot-check.
+- No regression across the whole app — `proxy.ts` runs on every route and `verifySession()` gets called from ~40 places, so this needs a full pass, not a spot-check.
+
+## Test Coverage Plan
+No code exists yet — this is the coverage this doc requires from implementation, not a report on existing tests. Project convention (`app/actions.test.ts`, Vitest): integration tests against the real dev Postgres, `next/cache`'s `revalidatePath` mocked (needs request-scoped context that doesn't exist outside a real request), external calls mocked. Auth tests should follow the same convention — a real `users` row inserted/cleaned up per test, no mocked DB.
+
+```
+CODE PATHS                                                    STATUS
+[+] lib/session.ts
+  ├── encrypt(payload)                                        [GAP] round-trips a payload correctly
+  └── decrypt(token)
+      ├── [GAP] valid signature, unexpired -> payload
+      ├── [GAP] tampered/invalid signature -> rejects
+      └── [GAP] expired exp -> rejects
+[+] lib/dal.ts — verifySession()
+  ├── [GAP] no cookie -> null/redirect
+  ├── [GAP] cookie decrypt fails -> fail closed, reject (Issue 1B)
+  ├── [GAP] valid cookie, user row deleted -> reject (the concrete "instant revocation" test)
+  ├── [GAP] valid cookie, user row role changed since login -> returns FRESH db role, not stale cookie role
+  └── [GAP] DB error during the live check -> fail closed, reject (Issue 1B)
+[+] app/proxy.ts — proxy()
+  ├── [GAP] no/invalid cookie, protected path -> redirect /login
+  ├── [GAP] valid cookie, admin-only path, role=General User -> redirect home
+  ├── [GAP] valid cookie, admin-only path, role=Admin -> next()
+  └── [GAP] /login and /share/[token] -> never redirected (exclusion list, Constraints)
+[+] login Server Action
+  ├── [GAP] unknown email -> rejected, generic error (don't leak which field was wrong)
+  ├── [GAP] correct email, wrong password -> rejected, generic error
+  └── [GAP] correct credentials -> session cookie set, redirect
+[+] logout Server Action
+  └── [GAP] clears the cookie; next request is unauthenticated
+[+] Admin-only actions (10: createUser, deleteUser, deleteVendor, cost-book create/update, createStage, updateStageName, moveStageUp, moveStageDown, updateSettings, createVendor)
+  └── [GAP] called directly (not via the gated page) by a General User session -> rejected by the action's own role check, not just page gating (Issue 1C, expanded after Outside Voice — the concrete test for this finding)
+[+] Non-admin actions (the remaining ~25+ in app/actions.ts)
+  └── [GAP] called with no session at all -> rejected by verifySession(), not silently run
+[+] app/(app)/layout.tsx (found during Outside Voice pass)
+  ├── [GAP] unauthenticated request to any wrapped page -> redirect /login (the doc's actual opening threat scenario)
+  ├── [GAP] deleted/demoted user's next page render -> rejected, not just their next mutation
+  └── [GAP] /login and /share/[token] remain outside the group, unaffected
+
+USER FLOWS
+[+] Login flow
+  ├── [GAP] [→E2E] Real Manage Users record: correct login reaches the dashboard
+  └── [GAP] Wrong password shows a clear error, no page crash
+[+] Session expiry / logout flow
+  └── [GAP] [→E2E] Logout, then any protected page redirects to /login again
+[+] Read-access revocation flow (found during Outside Voice pass)
+  └── [GAP] [→E2E] Delete a user mid-session, then that user tries to load any gated page (not just call an action) -> redirected, not shown stale data
+
+COVERAGE: 0/26 paths tested (0% — no code exists yet)
+GAPS: 26 (3 marked [→E2E], the rest unit/integration per the app/actions.test.ts convention)
+```
+
+**Regression note:** every one of the ~40 existing Server Actions and 5 Route Handlers gets a new `verifySession()` call inserted — each is a *modification* of working code, not new code. `app/actions.test.ts` already covers several of these functions' happy paths (`duplicateLineItem`, `updateLineItemSchedule`, `syncInspectionVideos`, etc.); per the skill's REGRESSION RULE, each modified action's existing test must be re-run with a real authenticated session in the test setup, or it will start failing for a reason unrelated to what it actually tests (regression risk, not a new gap — **CRITICAL**, mandatory, not optional).
 
 ## Dependencies
 - Depends on: migration `0028_users.sql` (users table) — already shipped.
 - Blocks: nothing currently blocked on this, but any future feature that needs "whose session is this" (audit trails, per-user filtering) needs this in place first.
 
+## NOT in scope
+- **Multi-tenant/org model** — deferred per Premise 1; the "2-3 outside operators saying yes" bar from the 2026-09-11 doc hasn't been cleared (David at Epic is one named lead expressing interest, not a commitment).
+- **Vendor-facing login** — deferred per Premise 3; vendor status updates stay human-relayed (Courtney), not self-service.
+- **Self-serve password reset / email verification** — deferred; Chris resets manually via a direct `users` table `UPDATE` for a 3-10 person user base. Revisit if the user count grows enough that manual reset becomes a real burden.
+- **Login rate limiting / brute-force protection** — deferred; tiny, known user base, revisit if the app becomes internet-discoverable beyond "knows the URL."
+- **OAuth / social login / magic links** — not needed for internal staff accounts; would come from switching to Approach B (Auth.js), which was rejected as heavier than the current demand justifies.
+- **Auth-aware audit trail / "who changed what"** — the `users` table and sessions make this possible later, but no logging/history feature is scoped here.
+
+## What already exists
+- **`users` table + bcrypt hashing** (migration `0028_users.sql`, shipped this session) — the account store this entire design reuses; not rebuilt.
+- **`DeleteInspectionButton`-style confirm patterns** and the existing Manage Users CRUD (`app/setup/users/page.tsx`, `createUser`/`deleteUser` in `app/actions.ts`) — the login/logout UI should match this codebase's established form-action + `useTransition` conventions (see `CreateUserForm.tsx`, `HelpWidget.tsx`) rather than introducing a new pattern.
+- **`lib/db.ts`'s fail-closed-on-missing-env-var pattern** (`DATABASE_URL is not set`) — directly reused for `AUTH_SECRET`, not reinvented.
+- **`app/actions.test.ts`'s real-Postgres integration test convention** — reused for auth tests rather than introducing mocked-DB tests as a new pattern in this codebase.
+
+## Failure modes
+| Codepath | Realistic production failure | Test? | Error handling? | User sees |
+|---|---|---|---|---|
+| `AUTH_SECRET` missing | Forgotten in a new Vercel env / preview deploy | GAP (planned) | Required: throw at startup | App fails to boot — loud, not silent (resolved, Issue 1A) |
+| `verifySession()` DB check | Postgres connection drop/timeout mid-request | GAP (planned) | Required: fail closed, abort | Action/page fails with an error, not silently granted (resolved, Issue 1B) |
+| Cookie tampering | Modified/corrupted cookie value | GAP (planned) | `jose` rejects invalid signature | Redirected to `/login`, no crash |
+| Cookie expiry | User's 30-day session lapses mid-task | GAP (planned) | Redirect to `/login` | Loses in-progress form state — no draft-save scoped here, acceptable for a 3-10 person tool |
+| Role changed mid-session | Chris demotes a user while they're active | GAP (planned) | `verifySession()` returns fresh role | Next admin-only action/page rejected immediately (this doc's core improvement) |
+| Bootstrap chicken-and-egg | First admin account needed before any admin exists to create one | **Critical gap — no test possible until Bootstrap Open Question is resolved** | None yet — open question | App is unusable for admin tasks until resolved manually |
+
+**Critical gap:** the Bootstrap path (Open Questions) has no test coverage and no error handling because it isn't designed yet — it's the one Open Question that blocks starting implementation, not just a nice-to-decide-later item, since `/setup/users` becomes gated by this same feature.
+
+## TODOS.md updates
+No new items proposed. The deferred items above (self-serve password reset, rate limiting, OAuth) are already captured as Open Questions/scope notes within this design doc, not orphaned ideas needing separate tracking. One existing TODOS.md item — "Build real authentication/session system" — is what this doc implements; mark it done in TODOS.md once the code ships (not now, since nothing is built yet).
+
+## Worktree parallelization strategy
+Sequential implementation, no parallelization opportunity — `lib/session.ts` → `lib/dal.ts` → `app/proxy.ts` + `app/(app)/layout.tsx` → the ~40 call-site edits all depend on the same two foundational files existing first, and the call-site edits themselves are mechanical enough (add one import, one line) that splitting them across worktrees would cost more in merge coordination than it saves.
+
+## Implementation Tasks
+Synthesized from this review's findings. Run with Claude Code; checkbox as you ship.
+
+- [ ] **T1 (P1, human: ~2h / CC: ~20min)** — auth core — Create `lib/session.ts` (`encrypt()`/`decrypt()` via `jose`, HS256, `AUTH_SECRET`, fail-closed on missing env var)
+  - Surfaced by: Architecture (Issue 1A), Code Quality (Issue 2A — DRY, single shared module)
+  - Files: `lib/session.ts` (new)
+  - Verify: unit tests for round-trip, tamper-rejection, expiry-rejection
+- [ ] **T2 (P1, human: ~3h / CC: ~30min)** — auth core — Create `lib/dal.ts` (`verifySession()`, `cache()`-wrapped, live DB check returning fresh role, fail-closed on DB error)
+  - Surfaced by: Approach A correction (Outside Voice's Next.js docs research), Performance (Issue 4A)
+  - Files: `lib/dal.ts` (new)
+  - Verify: integration tests against real dev Postgres per `app/actions.test.ts` convention — deleted user, demoted user, DB-error-simulation cases
+- [ ] **T3 (P1, human: ~1h / CC: ~15min)** — routing — Create `app/proxy.ts` (renamed from `middleware.ts`; optimistic redirect, admin-route check, matcher excluding `/login` and `/share/*`)
+  - Surfaced by: Approach A correction; Constraints (`/share/[token]` exclusion)
+  - Files: `app/proxy.ts` (new)
+  - Verify: unauthenticated → redirect; General User on admin path → redirect; `/share/[token]` unaffected
+- [ ] **T4 (P1, human: ~2h / CC: ~20min)** — routing — Create `app/(app)/layout.tsx` calling `verifySession()`, move existing pages under the route group
+  - Surfaced by: Outside Voice finding 1 (page-level read gap)
+  - Files: `app/(app)/layout.tsx` (new), all 11 `page.tsx` files that call `getSql()` directly (moved under the route group, no logic change)
+  - Verify: deleted/demoted user's next page load is rejected, not just their next action
+- [ ] **T5 (P1, human: ~1h / CC: ~15min)** — auth flow — Login/logout Server Actions, rewrite `app/login/page.tsx` from decorative to a real form
+  - Surfaced by: Problem Statement
+  - Files: `app/login/page.tsx`, new login/logout actions
+  - Verify: correct credentials succeed; wrong password/unknown email both show a generic error; logout clears the cookie
+- [ ] **T6 (P1, human: ~3h / CC: ~30min)** — enforcement — Add `verifySession()` to all ~40 existing Server Action and Route Handler call sites
+  - Surfaced by: Success Criteria; Test Coverage Plan REGRESSION note
+  - Files: `app/actions.ts`, `app/cost-book/actions.ts`, the 5 `route.ts` handlers
+  - Verify: `app/actions.test.ts`'s existing tests updated with an authenticated session in setup — CRITICAL regression check, not optional
+- [ ] **T7 (P1, human: ~1h / CC: ~10min)** — authorization — Add explicit `role === 'Admin'` check to all 10 admin-only actions
+  - Surfaced by: Architecture (Issue 1C), Outside Voice finding 2
+  - Files: `app/actions.ts` (`createUser`, `deleteUser`, `deleteVendor`, `createStage`, `updateStageName`, `moveStageUp`, `moveStageDown`, `updateSettings`, `createVendor`), `app/cost-book/actions.ts` (create/update actions)
+  - Verify: direct call by a General User session (not via UI) is rejected
+- [ ] **T8 (P2, human: ~30min / CC: ~10min)** — ops — Decide and implement the Bootstrap path for the first admin account
+  - Surfaced by: Failure modes (critical gap)
+  - Files: a one-time seed script, or a documented manual `INSERT`
+  - Verify: a fresh environment can create its first admin without the chicken-and-egg problem
+
+_No new tasks from Performance beyond T2's `cache()` requirement, already folded into T2._
+
 ## The Assignment
-Before any code gets written: decide the four Open Questions above (admin route list, session lifetime, revocation tolerance, bootstrap path for the first admin account) — quick decisions, not further scoping. Then run `/plan-eng-review` on this doc to lock the exact middleware/cookie implementation before touching code — middleware runs on every request in the app, so a mistake here is an app-wide outage, not a contained bug.
+Before any code gets written: decide the remaining Open Questions above (admin route list, session lifetime, rate limiting, bootstrap path for the first admin account) — quick decisions, not further scoping. `/plan-eng-review` already ran on this doc (see the architecture correction above — Approach A changed materially as a result) and locked the `proxy.ts` + DAL implementation shape before any code was touched.
 
 ## What I noticed about how you think
 - You didn't let "Building a startup" mode go unchallenged when I pushed back with your own 9/11 premise — you didn't relitigate it, you just told me the truth: "David at Epic Property Management... very interested." That's the "user's words beat the founder's pitch" instinct already built into how you report your own progress.
