@@ -584,6 +584,69 @@ export async function suggestHistoricalCost(itemName: string): Promise<{ suggest
   }
 }
 
+export type AutoBuildResult = { applied: number; skipped: number; total: number }
+
+// "Run Auto Build" (user request, 2026-09-22) -- the bulk version of
+// suggestHistoricalCost/applyHistoricalCostSuggestion above: instead of a
+// reviewer clicking "Suggest from history" and then "Apply" per blank line
+// item, this runs that same lookup for every qualifying item on the
+// inspection in one pass and auto-applies whatever clears the same 0.75
+// similarity bar those two already use -- still suggest-and-confirm in
+// spirit (nothing below the confidence bar is ever applied, exactly the
+// same threshold a reviewer clicking through one at a time would see), just
+// triggered once instead of once per item. This is explicitly a single,
+// reviewer-initiated bulk action, not automatic computation on page load --
+// the "on-demand, not automatic" reasoning on suggestHistoricalCost above
+// was about avoiding unprompted per-render cost, not about ruling this out.
+// Sequential, not parallel, matching import-cost-history.mjs's own
+// embedding-call pattern -- no evidence this API is safe to hit concurrently.
+export async function runAutoBuildQuote(inspectionId: string): Promise<AutoBuildResult> {
+  await requireSessionOrThrow()
+  const sql = getSql()
+
+  const candidates = await sql`
+    select id, item from line_items
+    where inspection_id = ${inspectionId} and tenant_approved = false
+      and supplier is null and sku is null and materials_cost is null
+  `
+
+  let applied = 0
+  let skipped = 0
+  for (const li of candidates) {
+    const trimmed = String(li.item).trim()
+    if (!trimmed) {
+      skipped++
+      continue
+    }
+    const queryEmbedding = await embedText(trimmed, 'RETRIEVAL_QUERY')
+    if (!queryEmbedding) {
+      skipped++
+      continue
+    }
+    const literal = toVectorLiteral(queryEmbedding)
+    const [best] = await sql`
+      select sku, unit_price, 1 - (embedding <=> ${literal}::vector) as similarity
+      from cost_book_materials
+      where embedding is not null and sku is not null
+      order by embedding <=> ${literal}::vector
+      limit 1
+    `
+    if (best && Number(best.similarity) >= 0.75) {
+      await sql`
+        update line_items
+        set supplier = 'Home Depot', sku = ${best.sku}, materials_cost = ${best.unit_price}
+        where id = ${li.id}
+      `
+      applied++
+    } else {
+      skipped++
+    }
+  }
+
+  revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
+  return { applied, skipped, total: candidates.length }
+}
+
 // Applies a suggestHistoricalCost() result the reviewer explicitly picked --
 // writes source/sku/materials_cost. Same "explicit reviewer choice can
 // overwrite" reasoning as linkLineItemToBulkMaterial above, but the UI only

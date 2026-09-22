@@ -146,7 +146,7 @@ export default async function InspectionPage({
                 Tenant Chargeback Review
               </a>
               <a href={`/inspections/${id}/quote-sheet`} className={linkClass}>
-                Move to Quote
+                Build Quote
               </a>
               {quoteActionsVisible && (
                 <>

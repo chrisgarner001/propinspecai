@@ -22,6 +22,13 @@ import RemoveSectionControl from '@/app/components/RemoveSectionControl'
 import SaveChangesButton from '@/app/components/SaveChangesButton'
 import StatusSelect from '@/app/components/StatusSelect'
 import CreateBatchesButton from '@/app/components/CreateBatchesButton'
+import RunAutoBuildButton from '@/app/components/RunAutoBuildButton'
+
+// Raised from the platform default -- "Run Auto Build" (runAutoBuildQuote)
+// makes one sequential embedding call per blank line item, which can add up
+// on a large inspection. Same reasoning/precedent as the inspection detail
+// page's own maxDuration for video processing.
+export const maxDuration = 300
 
 // Options for this page's status pill -- a strict subset of the full
 // inspections.status enum (see StatusBadge.tsx's STATUS_ORDER). "Under
@@ -226,6 +233,7 @@ export default async function QuoteSheetPage({
           >
             Stage View
           </a>
+          <RunAutoBuildButton inspectionId={id} />
           <a
             href={`/inspections/${id}/quote-sheet/materials-order/pdf`}
             target="_blank"
