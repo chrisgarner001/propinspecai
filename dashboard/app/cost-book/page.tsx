@@ -177,6 +177,14 @@ export default async function CostBookPage({
         GPM&apos;s reference pricing. Vendor estimates are placeholders only, used until a real vendor quote comes
         in for a specific job.
       </p>
+      <div className="px-4 md:px-6 pt-2">
+        <a
+          href="/cost-book/stock-items"
+          className="inline-block text-[12px] text-accent underline decoration-accent/40"
+        >
+          Stock Items — GPM&apos;s standardized rehab items, checked first on the Quote Sheet →
+        </a>
+      </div>
 
       {/* --- GPM Labor --- */}
       <section className="border-t border-border mt-5">

@@ -16,6 +16,7 @@ import AppShell from '@/app/components/AppShell'
 import AddLineItemSku from '@/app/components/AddLineItemSku'
 import LinkBulkMaterialSelect from '@/app/components/LinkBulkMaterialSelect'
 import SuggestCostFromHistory from '@/app/components/SuggestCostFromHistory'
+import SaveAsStockItem from '@/app/components/SaveAsStockItem'
 import LineItemVendorAssignment from '@/app/components/LineItemVendorAssignment'
 import LineItemMaterialsCost from '@/app/components/LineItemMaterialsCost'
 import RemoveSectionControl from '@/app/components/RemoveSectionControl'
@@ -148,6 +149,14 @@ export default async function QuoteSheetPage({
     where inspection_id = ${id}
     order by created_at
   `) as unknown as BulkMaterial[]
+
+  // Stock Items (docs/designs/propinspec-stock-items.md) -- offered as
+  // datalist suggestions on "Save as Stock Item" so a reviewer reuses an
+  // existing category bucket instead of forking a near-duplicate one.
+  const stockCategoryRows = await sql`
+    select distinct category from stock_items order by category
+  `
+  const stockItemCategories = stockCategoryRows.map((r) => r.category as string)
 
   // Bulk-item auto-fill (docs/designs/quote-sheet-bulk-item-auto-fill.md): a
   // suggest-and-confirm banner, not a silent write -- computed here from data
@@ -614,6 +623,10 @@ export default async function QuoteSheetPage({
 
                 {!li.supplier && !li.sku && !li.materials_cost && (
                   <SuggestCostFromHistory lineItemId={li.id} inspectionId={id} itemName={li.item} />
+                )}
+
+                {li.supplier && li.materials_cost && (
+                  <SaveAsStockItem lineItemId={li.id} categories={stockItemCategories} />
                 )}
 
                 {(additionalSkusByItem.get(li.id) ?? []).map((row) => (

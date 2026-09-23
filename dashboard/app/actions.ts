@@ -549,7 +549,16 @@ export async function linkLineItemToBulkMaterial(lineItemId: string, inspectionI
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
 }
 
-export type CostSuggestion = { sku: string; materialName: string; unitPrice: string; similarity: number }
+export type CostSuggestion = {
+  sku: string | null
+  materialName: string
+  unitPrice: string
+  similarity: number
+  supplier: string
+  source: 'stock' | 'history'
+}
+
+const SIMILARITY_THRESHOLD = 0.75
 
 // Cost Book learning engine (docs/designs/propinspec-cost-history.md) --
 // on-demand, not computed automatically for every blank line item on page
@@ -558,6 +567,13 @@ export type CostSuggestion = { sku: string; materialName: string; unitPrice: str
 // would add real, unnecessary latency/cost to a page that's already data-heavy.
 // Suggest-and-confirm only, same as bulk-item auto-fill -- this never writes
 // anything by itself, see applyHistoricalCostSuggestion below.
+//
+// Stock Items rethink (docs/designs/propinspec-stock-items.md): checks the
+// small, curated stock_items table FIRST. A hit there is GPM's own
+// standardized answer for this item type, so it's returned alone (not mixed
+// with General results) and labeled distinctly in the UI. Only when no
+// Stock Item clears the bar does this fall through to the original
+// all-history search against cost_book_materials -- unchanged from before.
 export async function suggestHistoricalCost(itemName: string): Promise<{ suggestions: CostSuggestion[] }> {
   await requireSessionOrThrow()
   const trimmed = itemName.trim()
@@ -566,8 +582,32 @@ export async function suggestHistoricalCost(itemName: string): Promise<{ suggest
   const queryEmbedding = await embedText(trimmed, 'RETRIEVAL_QUERY')
   if (!queryEmbedding) return { suggestions: [] }
   const literal = toVectorLiteral(queryEmbedding)
-
   const sql = getSql()
+
+  const [stockBest] = await sql`
+    select
+      sku, material_name, unit_price, supplier,
+      1 - (embedding <=> ${literal}::vector) as similarity
+    from stock_items
+    where embedding is not null
+    order by embedding <=> ${literal}::vector
+    limit 1
+  `
+  if (stockBest && Number(stockBest.similarity) >= SIMILARITY_THRESHOLD) {
+    return {
+      suggestions: [
+        {
+          sku: stockBest.sku,
+          materialName: stockBest.material_name,
+          unitPrice: stockBest.unit_price,
+          similarity: Number(stockBest.similarity),
+          supplier: stockBest.supplier,
+          source: 'stock',
+        },
+      ],
+    }
+  }
+
   const rows = await sql`
     select
       sku, material_name, unit_price,
@@ -579,8 +619,15 @@ export async function suggestHistoricalCost(itemName: string): Promise<{ suggest
   `
   return {
     suggestions: rows
-      .filter((r) => Number(r.similarity) >= 0.75)
-      .map((r) => ({ sku: r.sku, materialName: r.material_name, unitPrice: r.unit_price, similarity: Number(r.similarity) })),
+      .filter((r) => Number(r.similarity) >= SIMILARITY_THRESHOLD)
+      .map((r) => ({
+        sku: r.sku,
+        materialName: r.material_name,
+        unitPrice: r.unit_price,
+        similarity: Number(r.similarity),
+        supplier: 'Home Depot',
+        source: 'history' as const,
+      })),
   }
 }
 
@@ -600,6 +647,12 @@ export type AutoBuildResult = { applied: number; skipped: number; total: number 
 // was about avoiding unprompted per-render cost, not about ruling this out.
 // Sequential, not parallel, matching import-cost-history.mjs's own
 // embedding-call pattern -- no evidence this API is safe to hit concurrently.
+//
+// Stock Items rethink (docs/designs/propinspec-stock-items.md): same
+// first-check-stock-then-fall-through-to-history order as
+// suggestHistoricalCost, applied automatically here since this function
+// already auto-writes anything >=0.75 (unchanged auto-apply contract --
+// only the source table checked first has changed).
 export async function runAutoBuildQuote(inspectionId: string): Promise<AutoBuildResult> {
   await requireSessionOrThrow()
   const sql = getSql()
@@ -624,6 +677,24 @@ export async function runAutoBuildQuote(inspectionId: string): Promise<AutoBuild
       continue
     }
     const literal = toVectorLiteral(queryEmbedding)
+
+    const [stockBest] = await sql`
+      select sku, unit_price, supplier, 1 - (embedding <=> ${literal}::vector) as similarity
+      from stock_items
+      where embedding is not null
+      order by embedding <=> ${literal}::vector
+      limit 1
+    `
+    if (stockBest && Number(stockBest.similarity) >= SIMILARITY_THRESHOLD) {
+      await sql`
+        update line_items
+        set supplier = ${stockBest.supplier}, sku = ${stockBest.sku}, materials_cost = ${stockBest.unit_price}
+        where id = ${li.id}
+      `
+      applied++
+      continue
+    }
+
     const [best] = await sql`
       select sku, unit_price, 1 - (embedding <=> ${literal}::vector) as similarity
       from cost_book_materials
@@ -631,7 +702,7 @@ export async function runAutoBuildQuote(inspectionId: string): Promise<AutoBuild
       order by embedding <=> ${literal}::vector
       limit 1
     `
-    if (best && Number(best.similarity) >= 0.75) {
+    if (best && Number(best.similarity) >= SIMILARITY_THRESHOLD) {
       await sql`
         update line_items
         set supplier = 'Home Depot', sku = ${best.sku}, materials_cost = ${best.unit_price}
@@ -648,23 +719,76 @@ export async function runAutoBuildQuote(inspectionId: string): Promise<AutoBuild
 }
 
 // Applies a suggestHistoricalCost() result the reviewer explicitly picked --
-// writes source/sku/materials_cost. Same "explicit reviewer choice can
+// writes supplier/sku/materials_cost. Same "explicit reviewer choice can
 // overwrite" reasoning as linkLineItemToBulkMaterial above, but the UI only
 // ever offers this button when the line item's Supplier/SKU/cost are blank
 // (see the Quote Sheet render), so in practice it never overwrites real data.
+// `supplier` is a real param (not hardcoded) since a Stock Item suggestion
+// (docs/designs/propinspec-stock-items.md) may not always be Home Depot.
 export async function applyHistoricalCostSuggestion(
   lineItemId: string,
   inspectionId: string,
-  sku: string,
-  unitPrice: string
+  sku: string | null,
+  unitPrice: string,
+  supplier: string
 ) {
   await requireSessionOrThrow()
   await getSql()`
     update line_items
-    set supplier = 'Home Depot', sku = ${sku}, materials_cost = ${unitPrice}
+    set supplier = ${supplier}, sku = ${sku}, materials_cost = ${unitPrice}
     where id = ${lineItemId}
   `
   revalidatePath(`/inspections/${inspectionId}/quote-sheet`)
+}
+
+// "Save as Stock Item" (docs/designs/propinspec-stock-items.md) -- the
+// adoption mechanism: promotes a correction the reviewer already made on
+// this exact Quote Sheet line item (Supplier/SKU/materials cost were typed
+// or overridden and saved) into the curated stock_items catalog, so the
+// next line item of the same type surfaces it first via suggestHistoricalCost
+// / runAutoBuildQuote above, instead of the noisy General history search.
+//
+// Deliberately session-gated, NOT admin-gated: this must be usable by
+// whichever role actually edits Quote Sheets (updateQuoteSheetItems above
+// is session-only too) -- admin-gating the one action this whole feature
+// depends on would make it unreachable by the people it's built for. The
+// separate Stock Items catalog page (app/cost-book/stock-items) stays
+// admin-gated, matching every other catalog page in the app.
+//
+// Reads the line item's already-saved values directly from the DB rather
+// than trusting client-submitted ones -- the button is only ever rendered
+// once Supplier/SKU/materials cost are non-blank (see the Quote Sheet
+// render), so this simply confirms that same state server-side.
+export async function promoteToStockItem(lineItemId: string, category: string) {
+  const session = await requireSessionOrThrow()
+  const trimmedCategory = category.trim()
+  if (!trimmedCategory) throw new Error('Category is required')
+
+  const sql = getSql()
+  const [li] = await sql`select item, supplier, sku, materials_cost from line_items where id = ${lineItemId}`
+  if (!li || !li.supplier || li.materials_cost === null) {
+    throw new Error('This line item needs a Supplier and a materials cost saved before it can become a Stock Item.')
+  }
+
+  const materialName = String(li.item).trim()
+  // Same null-on-failure convention as the General import (docs/designs/
+  // propinspec-cost-history.md): the promotion still saves -- the reviewer's
+  // correction is never lost to a Gemini API hiccup -- just without a
+  // usable embedding until a future backfill re-embeds it.
+  const embedding = await embedText(materialName, 'RETRIEVAL_DOCUMENT')
+  const literal = embedding ? toVectorLiteral(embedding) : null
+
+  await sql`
+    insert into stock_items (category, material_name, supplier, sku, unit_price, embedding, created_by)
+    values (
+      ${trimmedCategory}, ${materialName}, ${li.supplier}, ${li.sku}, ${li.materials_cost},
+      ${literal}::vector, ${session.email}
+    )
+    on conflict (lower(category), lower(material_name)) do update
+    set supplier = excluded.supplier, sku = excluded.sku, unit_price = excluded.unit_price,
+        embedding = excluded.embedding, updated_at = now()
+  `
+  revalidatePath('/cost-book/stock-items')
 }
 
 // Called directly from the Job Timeline's client component (drag-end commit,

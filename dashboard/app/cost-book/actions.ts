@@ -3,6 +3,7 @@
 import { getSql } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireAdminOrThrow } from '@/lib/dal'
+import { embedText, toVectorLiteral } from '@/lib/embeddings'
 
 function toNumberOrNull(value: FormDataEntryValue | null): number | null {
   if (value === null || value === '') return null
@@ -111,4 +112,85 @@ export async function updateVendorEstimate(formData: FormData) {
     where id = ${id}
   `
   revalidatePath('/cost-book')
+}
+
+// --- Stock Items (docs/designs/propinspec-stock-items.md) ---
+// Admin-gated, unlike promoteToStockItem in app/actions.ts (session-gated,
+// reachable from the Quote Sheet) -- this is direct catalog curation
+// (pre-seeding, fixing a bad promotion, merging a duplicate), same
+// admin-only pattern as every other catalog page (Inspectors, Vendors, etc).
+
+export async function createStockItem(formData: FormData) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  const category = String(formData.get('category') || '').trim()
+  const materialName = String(formData.get('material_name') || '').trim()
+  const unitPrice = toNumberOrNull(formData.get('unit_price'))
+  if (!category || !materialName || unitPrice === null) return
+  const supplier = String(formData.get('supplier') || 'Home Depot')
+  const sku = String(formData.get('sku') || '')
+  const unit = String(formData.get('unit') || '')
+  const notes = String(formData.get('notes') || '')
+
+  const embedding = await embedText(materialName, 'RETRIEVAL_DOCUMENT')
+  const literal = embedding ? toVectorLiteral(embedding) : null
+
+  await sql`
+    insert into stock_items (category, material_name, supplier, sku, unit_price, unit, notes, embedding)
+    values (
+      ${category}, ${materialName}, ${supplier}, ${sku || null}, ${unitPrice}, ${unit || null}, ${notes || null},
+      ${literal}::vector
+    )
+    on conflict (lower(category), lower(material_name)) do update
+    set supplier = excluded.supplier, sku = excluded.sku, unit_price = excluded.unit_price,
+        unit = excluded.unit, notes = excluded.notes, embedding = excluded.embedding, updated_at = now()
+  `
+  revalidatePath('/cost-book/stock-items')
+}
+
+// Re-embeds only when material_name actually changed -- editing just the
+// price/notes on an existing, already-matched Stock Item shouldn't cost an
+// API call or risk a transient failure clearing a working embedding.
+export async function updateStockItem(formData: FormData) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  const id = String(formData.get('id'))
+  const category = String(formData.get('category') || '').trim()
+  const materialName = String(formData.get('material_name') || '').trim()
+  const unitPrice = toNumberOrNull(formData.get('unit_price'))
+  if (!category || !materialName || unitPrice === null) return
+  const supplier = String(formData.get('supplier') || 'Home Depot')
+  const sku = String(formData.get('sku') || '')
+  const unit = String(formData.get('unit') || '')
+  const notes = String(formData.get('notes') || '')
+
+  const [existing] = await sql`select material_name from stock_items where id = ${id}`
+  const nameChanged = existing && existing.material_name !== materialName
+
+  if (nameChanged) {
+    const embedding = await embedText(materialName, 'RETRIEVAL_DOCUMENT')
+    const literal = embedding ? toVectorLiteral(embedding) : null
+    await sql`
+      update stock_items
+      set category = ${category}, material_name = ${materialName}, supplier = ${supplier},
+          sku = ${sku || null}, unit_price = ${unitPrice}, unit = ${unit || null}, notes = ${notes || null},
+          embedding = ${literal}::vector, updated_at = now()
+      where id = ${id}
+    `
+  } else {
+    await sql`
+      update stock_items
+      set category = ${category}, supplier = ${supplier}, sku = ${sku || null}, unit_price = ${unitPrice},
+          unit = ${unit || null}, notes = ${notes || null}, updated_at = now()
+      where id = ${id}
+    `
+  }
+  revalidatePath('/cost-book/stock-items')
+}
+
+export async function deleteStockItem(id: string) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  await sql`delete from stock_items where id = ${id}`
+  revalidatePath('/cost-book/stock-items')
 }

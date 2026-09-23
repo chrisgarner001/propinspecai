@@ -14,8 +14,11 @@ insert into inspection_types (name) values ('Move-Out'), ('Move-In')
   on conflict (name) do nothing;
 
 alter table inspections drop constraint if exists inspections_inspection_type_check;
-alter table inspections
-  add constraint inspections_inspection_type_fkey foreign key (inspection_type) references inspection_types (name);
+do $$ begin
+  alter table inspections
+    add constraint inspections_inspection_type_fkey foreign key (inspection_type) references inspection_types (name);
+exception when duplicate_object then null;
+end $$;
 
 -- "Inspector is a dropdown or fill in" -- inspections.inspector_name stays
 -- free text (not a foreign key), this is just a convenience catalog for the

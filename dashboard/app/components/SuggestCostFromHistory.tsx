@@ -28,9 +28,9 @@ export default function SuggestCostFromHistory({
     })
   }
 
-  function handleApply(sku: string, unitPrice: string) {
+  function handleApply(s: CostSuggestion) {
     startTransition(async () => {
-      await applyHistoricalCostSuggestion(lineItemId, inspectionId, sku, unitPrice)
+      await applyHistoricalCostSuggestion(lineItemId, inspectionId, s.sku, s.unitPrice, s.supplier)
       setSuggestions(null)
       router.refresh()
     })
@@ -50,20 +50,27 @@ export default function SuggestCostFromHistory({
   }
 
   if (suggestions.length === 0) {
-    return <div className="text-[11px] text-text-muted">No confident match found in purchase history.</div>
+    return <div className="text-[11px] text-text-muted">No confident match found in Stock Items or purchase history.</div>
   }
 
+  // Stock Item matches (docs/designs/propinspec-stock-items.md) are GPM's
+  // own standardized answer, not a guess from noisy history -- labeled and
+  // styled distinctly so a reviewer can tell the difference at a glance.
+  const isStock = suggestions[0].source === 'stock'
+
   return (
-    <div className="space-y-1 bg-accent/5 rounded-[var(--radius-sm)] p-2">
-      <div className="text-[11px] font-semibold text-text-muted">Suggested from purchase history:</div>
+    <div className={`space-y-1 rounded-[var(--radius-sm)] p-2 ${isStock ? 'bg-success-bg' : 'bg-accent/5'}`}>
+      <div className="text-[11px] font-semibold text-text-muted">
+        {isStock ? 'Stock Item match:' : 'Suggested from purchase history:'}
+      </div>
       {suggestions.map((s) => (
-        <div key={s.sku} className="flex items-center justify-between gap-2 text-[11px]">
+        <div key={`${s.source}-${s.sku ?? s.materialName}`} className="flex items-center justify-between gap-2 text-[11px]">
           <span className="truncate" title={s.materialName}>
             {s.materialName} <span className="data-mono text-text-muted">${s.unitPrice}</span>
           </span>
           <button
             type="button"
-            onClick={() => handleApply(s.sku, s.unitPrice)}
+            onClick={() => handleApply(s)}
             disabled={isPending}
             className="shrink-0 bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-2 py-0.5 font-semibold disabled:opacity-50"
           >
