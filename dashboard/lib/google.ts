@@ -28,6 +28,24 @@ export function parseFolderIdFromUrl(url: string): string | null {
 export async function listVideosInFolder(folderId: string) {
   const auth = getGoogleAuth()
   const drive = google.drive({ version: 'v3', auth })
+
+  // Drive's files.list silently returns an empty result when the caller
+  // (the service account) can't see the parent folder at all -- it does not
+  // throw. Confirmed with a real call: a folder never shared with the
+  // service account returned files.list => [] while files.get on that same
+  // folder id threw a real 404 "File not found." Without this explicit
+  // check, an unshared folder is indistinguishable from a genuinely empty
+  // one, and the caller (syncInspectionVideos) surfaces the misleading
+  // "No video files found" instead of the real, actionable problem.
+  try {
+    await drive.files.get({ fileId: folderId, supportsAllDrives: true, fields: 'id' })
+  } catch {
+    const { client_email } = getCredentials()
+    throw new Error(
+      `Can't access this Drive folder -- make sure it's shared with ${client_email} (Viewer access is enough).`
+    )
+  }
+
   const res = await drive.files.list({
     q: `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`,
     supportsAllDrives: true,
