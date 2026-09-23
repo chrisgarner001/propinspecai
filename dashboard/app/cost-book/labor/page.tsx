@@ -1,0 +1,168 @@
+import { getSql } from '@/lib/db'
+import { requireAdmin } from '@/lib/dal'
+import { addGpmLaborRate, updateGpmLaborRate, addVendorEstimate, updateVendorEstimate } from '../actions'
+import AppShell from '@/app/components/AppShell'
+
+export const dynamic = 'force-dynamic'
+
+type GpmLaborRate = {
+  id: string
+  task_name: string
+  labor_rate: string
+  unit: string
+  notes: string | null
+}
+
+type VendorEstimate = {
+  id: string
+  trade_category: string
+  task_name: string
+  estimated_cost: string
+  is_placeholder: boolean
+  notes: string | null
+}
+
+const inputClass = 'border border-border rounded-[var(--radius-sm)] px-2 py-1.5 w-full min-w-0 bg-surface'
+const dataInputClass = `data-mono ${inputClass}`
+const saveButtonClass =
+  'bg-accent hover:bg-accent-hover text-white rounded-[var(--radius-sm)] px-3 py-1 text-[12px] font-semibold w-fit'
+const addButtonClass =
+  'bg-surface border border-border hover:bg-surface-alt rounded-[var(--radius-sm)] px-3 py-2 text-[12px] font-semibold w-fit'
+const emptyRowClass = 'px-3 py-3 text-[13px] text-text-muted italic'
+const mobileLabelClass = 'md:hidden text-[10px] font-semibold uppercase tracking-wide text-text-muted'
+
+function SectionHeading({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="px-4 md:px-6 pt-6 pb-3">
+      <h2 className="font-display font-bold text-[15px]">{title}</h2>
+      <p className="text-[13px] text-text-muted mt-0.5">{description}</p>
+    </div>
+  )
+}
+
+// Labor + Vendor Estimates sub-book (docs/designs/propinspec-cost-book-dashboard.md):
+// both GPM Labor and Vendor Estimates are GPM-internal cost-estimate
+// tables, not supplier catalogs, so they share this page rather than being
+// force-fit into a supplier tile (Premise 6). Moved here verbatim from the
+// old single /cost-book page -- same forms, same data, only the URL changed.
+export default async function CostBookLaborPage() {
+  await requireAdmin()
+  const sql = getSql()
+  const gpmLabor = (await sql`
+    select * from cost_book_gpm_labor order by task_name
+  `) as unknown as GpmLaborRate[]
+
+  const vendorEstimates = (await sql`
+    select * from cost_book_vendor_estimates order by trade_category, task_name
+  `) as unknown as VendorEstimate[]
+
+  const laborCols = 'grid-cols-1 md:grid-cols-[1.6fr_0.7fr_0.9fr_1.8fr_0.6fr]'
+  const vendorCols = 'grid-cols-1 md:grid-cols-[1.1fr_1.4fr_0.8fr_1fr_1.6fr_0.6fr]'
+
+  return (
+    <AppShell active="/cost-book" title="Cost Book — Labor">
+      {/* --- GPM Labor --- */}
+      <section className="border-t border-border mt-5">
+        <SectionHeading
+          title="GPM Labor"
+          description="Per-item labor charge for tasks GPM staff perform themselves."
+        />
+        <div role="table">
+          <div role="row" className={`hidden md:grid ${laborCols} gap-2 px-4 md:px-6 py-2 border-y border-border`}>
+            {['Task', 'Rate', 'Unit', 'Notes', ''].map((h) => (
+              <div key={h} role="columnheader" className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                {h}
+              </div>
+            ))}
+          </div>
+          {gpmLabor.length === 0 && <div className={emptyRowClass}>No labor rates yet.</div>}
+          {gpmLabor.map((r) => (
+            <form
+              key={r.id}
+              action={updateGpmLaborRate}
+              role="row"
+              className={`grid ${laborCols} gap-2 md:items-center px-4 md:px-6 py-3 md:py-2.5 border-b-2 md:border-b border-border`}
+            >
+              <input type="hidden" name="id" value={r.id} />
+              <div role="cell" className="font-medium">{r.task_name}</div>
+              <div role="cell" className="space-y-1">
+                <div className={mobileLabelClass}>Rate</div>
+                <input name="labor_rate" type="number" step="0.01" defaultValue={r.labor_rate} className={dataInputClass} />
+              </div>
+              <div role="cell" className="space-y-1">
+                <div className={mobileLabelClass}>Unit</div>
+                <input name="unit" defaultValue={r.unit} className={inputClass} />
+              </div>
+              <div role="cell" className="space-y-1">
+                <div className={mobileLabelClass}>Notes</div>
+                <input name="notes" defaultValue={r.notes ?? ''} className={inputClass} />
+              </div>
+              <div role="cell">
+                <button type="submit" className={saveButtonClass}>Save</button>
+              </div>
+            </form>
+          ))}
+        </div>
+        <form action={addGpmLaborRate} className={`grid ${laborCols} gap-2 items-end px-4 md:px-6 py-4`}>
+          <input name="task_name" required placeholder="Task name" className={inputClass} />
+          <input name="labor_rate" type="number" step="0.01" required placeholder="Rate" className={dataInputClass} />
+          <input name="unit" defaultValue="per item" placeholder="Unit" className={inputClass} />
+          <input name="notes" placeholder="Notes" className={inputClass} />
+          <button type="submit" className={addButtonClass}>Add</button>
+        </form>
+      </section>
+
+      {/* --- Vendor Estimates --- */}
+      <section className="border-t border-border">
+        <SectionHeading
+          title="Vendor Estimates"
+          description={'Placeholder rates used until a real vendor quote exists for this specific job. Uncheck "Placeholder" once a real quote replaces it.'}
+        />
+        <div role="table">
+          <div role="row" className={`hidden md:grid ${vendorCols} gap-2 px-4 md:px-6 py-2 border-y border-border`}>
+            {['Trade', 'Task', 'Est. Cost', 'Placeholder?', 'Notes', ''].map((h) => (
+              <div key={h} role="columnheader" className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                {h}
+              </div>
+            ))}
+          </div>
+          {vendorEstimates.length === 0 && <div className={emptyRowClass}>No vendor estimates yet.</div>}
+          {vendorEstimates.map((v) => (
+            <form
+              key={v.id}
+              action={updateVendorEstimate}
+              role="row"
+              className={`grid ${vendorCols} gap-2 md:items-center px-4 md:px-6 py-3 md:py-2.5 border-b-2 md:border-b border-border`}
+            >
+              <input type="hidden" name="id" value={v.id} />
+              <div role="cell" className="text-text-muted">{v.trade_category}</div>
+              <div role="cell" className="font-medium">{v.task_name}</div>
+              <div role="cell" className="space-y-1">
+                <div className={mobileLabelClass}>Est. Cost</div>
+                <input name="estimated_cost" type="number" step="0.01" defaultValue={v.estimated_cost} className={dataInputClass} />
+              </div>
+              <label role="cell" className="flex items-center gap-1.5 text-[12px] text-text-muted whitespace-nowrap">
+                <input type="checkbox" name="is_placeholder" defaultChecked={v.is_placeholder} />
+                Placeholder
+              </label>
+              <div role="cell" className="space-y-1">
+                <div className={mobileLabelClass}>Notes</div>
+                <input name="notes" defaultValue={v.notes ?? ''} className={inputClass} />
+              </div>
+              <div role="cell">
+                <button type="submit" className={saveButtonClass}>Save</button>
+              </div>
+            </form>
+          ))}
+        </div>
+        <form action={addVendorEstimate} className="grid grid-cols-1 md:grid-cols-[1.1fr_1.4fr_0.8fr_1.6fr_0.6fr] gap-2 items-end px-4 md:px-6 py-4">
+          <input name="trade_category" required placeholder="Trade category" className={inputClass} />
+          <input name="task_name" required placeholder="Task" className={inputClass} />
+          <input name="estimated_cost" type="number" step="0.01" required placeholder="Est. cost" className={dataInputClass} />
+          <input name="notes" placeholder="Notes" className={inputClass} />
+          <button type="submit" className={addButtonClass}>Add</button>
+        </form>
+      </section>
+    </AppShell>
+  )
+}

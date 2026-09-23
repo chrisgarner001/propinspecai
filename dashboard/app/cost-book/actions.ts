@@ -26,6 +26,7 @@ export async function addGpmLaborRate(formData: FormData) {
     values (${taskName}, ${laborRate ?? 0}, ${unit}, ${notes})
   `
   revalidatePath('/cost-book')
+  revalidatePath('/cost-book/labor')
 }
 
 export async function updateGpmLaborRate(formData: FormData) {
@@ -42,9 +43,21 @@ export async function updateGpmLaborRate(formData: FormData) {
     where id = ${id}
   `
   revalidatePath('/cost-book')
+  revalidatePath('/cost-book/labor')
 }
 
 // --- Materials ---
+
+// Auto-creates a `suppliers` row (case-insensitive) for a `source` value
+// that doesn't yet match one -- docs/designs/propinspec-cost-book-dashboard.md's
+// "orphaned/unmatched source values, explicitly resolved" rule. Every
+// material is always reachable from some dashboard tile; there's no
+// unmatched state to design around.
+async function ensureSupplierExists(source: string) {
+  if (!source) return
+  const sql = getSql()
+  await sql`insert into suppliers (name) values (${source}) on conflict (lower(name)) do nothing`
+}
 
 export async function addMaterial(formData: FormData) {
   await requireAdminOrThrow()
@@ -56,11 +69,13 @@ export async function addMaterial(formData: FormData) {
   const sku = String(formData.get('sku') || '')
   const notes = String(formData.get('notes') || '')
 
+  await ensureSupplierExists(source)
   await sql`
     insert into cost_book_materials (material_name, unit_price, unit, source, sku, notes)
     values (${materialName}, ${unitPrice ?? 0}, ${unit}, ${source}, ${sku || null}, ${notes})
   `
   revalidatePath('/cost-book')
+  revalidatePath(`/cost-book/suppliers/${encodeURIComponent(source)}`)
 }
 
 export async function updateMaterial(formData: FormData) {
@@ -73,12 +88,59 @@ export async function updateMaterial(formData: FormData) {
   const sku = String(formData.get('sku') || '')
   const notes = String(formData.get('notes') || '')
 
+  await ensureSupplierExists(source)
   await sql`
     update cost_book_materials
     set unit_price = ${unitPrice ?? 0}, unit = ${unit}, source = ${source}, sku = ${sku || null}, notes = ${notes}
     where id = ${id}
   `
   revalidatePath('/cost-book')
+  revalidatePath(`/cost-book/suppliers/${encodeURIComponent(source)}`)
+}
+
+// --- Suppliers (docs/designs/propinspec-cost-book-dashboard.md) ---
+
+export async function addSupplier(formData: FormData) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  const name = String(formData.get('name') || '').trim()
+  if (!name) throw new Error('Supplier name is required.')
+
+  const [existing] = await sql`select name from suppliers where lower(name) = lower(${name})`
+  if (existing) throw new Error(`A supplier named "${existing.name}" already exists.`)
+
+  await sql`insert into suppliers (name) values (${name})`
+  revalidatePath('/cost-book')
+}
+
+// Renames a supplier and cascades to every row that referenced it by name --
+// cost_book_materials.source and stock_items.supplier are both plain text,
+// not FKs (Data Model), so both would silently go stale otherwise,
+// reintroducing the exact fragmentation problem the case-insensitive unique
+// index exists to prevent. All three writes happen in one transaction.
+export async function renameSupplier(id: string, newName: string) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  const trimmed = newName.trim()
+  if (!trimmed) throw new Error('Supplier name is required.')
+
+  const [current] = await sql`select name from suppliers where id = ${id}`
+  if (!current) throw new Error('Supplier not found.')
+  if (current.name === trimmed) return
+
+  const [collision] = await sql`select name from suppliers where lower(name) = lower(${trimmed}) and id <> ${id}`
+  if (collision) throw new Error(`A supplier named "${collision.name}" already exists.`)
+
+  await sql.begin(async (tx) => {
+    await tx`update cost_book_materials set source = ${trimmed} where lower(source) = lower(${current.name})`
+    await tx`update stock_items set supplier = ${trimmed} where lower(supplier) = lower(${current.name})`
+    await tx`update suppliers set name = ${trimmed} where id = ${id}`
+  })
+
+  revalidatePath('/cost-book')
+  revalidatePath('/cost-book/stock-items')
+  revalidatePath(`/cost-book/suppliers/${encodeURIComponent(current.name)}`)
+  revalidatePath(`/cost-book/suppliers/${encodeURIComponent(trimmed)}`)
 }
 
 // --- Vendor Estimates ---
@@ -96,6 +158,7 @@ export async function addVendorEstimate(formData: FormData) {
     values (${tradeCategory}, ${taskName}, ${estimatedCost ?? 0}, ${notes})
   `
   revalidatePath('/cost-book')
+  revalidatePath('/cost-book/labor')
 }
 
 export async function updateVendorEstimate(formData: FormData) {
@@ -112,6 +175,7 @@ export async function updateVendorEstimate(formData: FormData) {
     where id = ${id}
   `
   revalidatePath('/cost-book')
+  revalidatePath('/cost-book/labor')
 }
 
 // --- Stock Items (docs/designs/propinspec-stock-items.md) ---
