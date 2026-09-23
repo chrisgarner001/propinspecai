@@ -1338,10 +1338,22 @@ export async function processNextInspectionVideo(inspectionId: string): Promise<
 // Resets one failed video back to 'pending' so the next processNextInspectionVideo
 // call in the loop picks it up again -- e.g. after fixing a Drive-permissions
 // issue that caused the original failure.
+//
+// Also allows retrying a row stuck at 'processing' (investigated 2026-09-23,
+// 11436 Syracuse): a Vercel function killed on timeout for a large video
+// dies mid-request, so processNextInspectionVideo's own catch block
+// (app/actions.ts, marks status='failed') never runs -- the row is left
+// permanently 'processing' with no self-service recovery. There's no
+// updated_at/heartbeat column to distinguish "genuinely still running" from
+// "stuck", so this trusts the user's judgment (they can see the same
+// spinner staying frozen) rather than guessing a staleness threshold --
+// worst case of a false-positive retry is a redundant reprocessing pass,
+// not data corruption, since processNextInspectionVideo always looks up the
+// oldest 'pending' row next.
 export async function retryInspectionVideo(videoRowId: string, inspectionId: string): Promise<{ videos: InspectionVideoRow[] }> {
   await requireSessionOrThrow()
   const sql = getSql()
-  await sql`update inspection_videos set status = 'pending', error_message = null where id = ${videoRowId} and status = 'failed'`
+  await sql`update inspection_videos set status = 'pending', error_message = null where id = ${videoRowId} and status in ('failed', 'processing')`
 
   const videos = (await sql`
     select id, drive_file_id, filename, status, error_message, line_items_created

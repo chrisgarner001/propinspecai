@@ -144,7 +144,14 @@ export default function VideoProcessingPanel({
                   {STATUS_LABEL[v.status] ?? v.status}
                   {v.status === 'done' && v.line_items_created > 0 ? ` (${v.line_items_created} items)` : ''}
                 </span>
-                {v.status === 'failed' && (
+                {/* 'processing' also gets Retry when no loop is actively running
+                    from this tab -- a row a server crash/timeout left stuck
+                    (investigated 2026-09-23, 11436 Syracuse: a Vercel timeout
+                    on a large video kills the request before the row can be
+                    marked 'failed') is otherwise permanently unrecoverable.
+                    Gated on !running so an actually in-flight video from this
+                    same loop doesn't show a misleading Retry mid-processing. */}
+                {(v.status === 'failed' || (v.status === 'processing' && !running)) && (
                   <button
                     type="button"
                     onClick={() => handleRetry(v.id)}

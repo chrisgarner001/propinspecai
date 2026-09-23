@@ -271,6 +271,27 @@ describe('video processing pipeline', () => {
     const reprocessed = await processNextInspectionVideo(inspectionId)
     expect(reprocessed.videos.find((v) => v.id === video.id)?.status).toBe('done')
   })
+
+  // Regression test for the 11436 Syracuse investigation (2026-09-23): a
+  // Vercel function killed on timeout for a large video dies mid-request,
+  // so processNextInspectionVideo's own catch block never runs -- the row
+  // is left stuck at 'processing' forever, same as if it were simulated by
+  // inserting a row directly at that status without ever calling process.
+  it('retry also recovers a video stuck at processing (e.g. a killed serverless function)', async () => {
+    const [stuck] = await sql`
+      insert into inspection_videos (inspection_id, drive_file_id, filename, status)
+      values (${inspectionId}, 'file-stuck', 'stuck.mp4', 'processing')
+      returning id
+    `
+
+    mockDownloadDriveFile.mockResolvedValue(Buffer.from('fake video bytes'))
+    mockExtractLineItemsFromVideo.mockResolvedValue([])
+    const retried = await retryInspectionVideo(stuck.id as string, inspectionId)
+    expect(retried.videos.find((v) => v.id === stuck.id)?.status).toBe('pending')
+
+    const reprocessed = await processNextInspectionVideo(inspectionId)
+    expect(reprocessed.videos.find((v) => v.id === stuck.id)?.status).toBe('done')
+  })
 })
 
 describe('duplicateLineItem schedule reset', () => {
