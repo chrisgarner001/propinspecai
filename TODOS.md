@@ -45,6 +45,13 @@ pending/processing/done/failed state machine) already provides equivalent behavi
 separately-shot clips. Worth building only if real GPM usage shows the manual workaround
 is a recurring pain — not speculative work.
 
+**Update (2026-09-24, manual-split plan-eng-review):** `scripts/split-video.mjs` now
+exists as a manual, operator-run stopgap for an oversized video someone already shot
+(downloads locally, ffmpeg-splits, re-uploads segments to Drive — see that review for
+the full disk-constraint reasoning). Revisit this TODO's "not speculative work" premise
+if that manual script sees real repeated use — that would be evidence the automatic,
+in-app version is worth the engineering cost after all.
+
 **Effort:** L
 **Priority:** P4
 **Depends on:** None
@@ -66,6 +73,14 @@ Gemini's own 2GB per-file limit. Removing the `/tmp` dependency could support ro
 doesn't document Readable-stream support, and ffmpeg's seek behavior (`-ss` + frame
 extraction) on a live stream/URL needs its own real verification before committing to
 it. Don't start this speculatively — confirm SDK/ffmpeg streaming support first.
+
+**Update (2026-09-24, manual-split plan-eng-review):** Found a concrete, specific
+version of the ffmpeg risk above — MP4/MOV files commonly place the `moov` atom at the
+end of the file, which forces ffmpeg to seek backward into the input to read it before
+decoding can start. A live Drive download is a non-seekable pipe, so this is a real,
+named blocker for any zero-disk streaming approach on GPM's actual phone-recorded
+clips, not a generic concern. Confirm this specifically (not just "streaming support in
+the abstract") before starting this TODO.
 
 **Effort:** L
 **Priority:** P4
