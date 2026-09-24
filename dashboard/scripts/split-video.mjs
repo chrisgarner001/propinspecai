@@ -2,6 +2,9 @@
 // pre-flight check, app/actions.ts) into fixed-length segments and re-uploads
 // them to the same Drive folder, so the app's existing per-video pipeline
 // processes each segment normally via its next "Check for new videos" sync.
+// Trashes (not permanently deletes) the original once every segment is
+// confirmed -- the service account only holds 'fileOrganizer' on GPM's
+// Shared Drive folders, which can trash but not permanently delete.
 //
 // Manual, operator-run -- not an in-app feature. See the plan-eng-review
 // report (main-eng-review-20260924-091853.md) for why this runs locally
@@ -174,12 +177,20 @@ async function main() {
       )
     }
 
-    console.log('All segments confirmed. Deleting original...')
-    await drive.files.delete({ fileId: row.drive_file_id, supportsAllDrives: true })
+    // Trash, not permanently delete: confirmed live (2026-09-24, splitting
+    // IMG_0014.MOV) that this service account holds 'fileOrganizer' on GPM's
+    // Shared Drive folders -- capabilities.canTrash is true but
+    // capabilities.canDelete is false. drive.files.delete() on a file the
+    // caller can't permanently delete returns a misleading "File not found"
+    // (404) instead of a 403, rather than any real absence of the file.
+    // Trashing achieves the same practical goal (out of the normal listing,
+    // out of any future sync) without needing delete rights nobody granted.
+    console.log('All segments confirmed. Trashing original...')
+    await drive.files.update({ fileId: row.drive_file_id, supportsAllDrives: true, requestBody: { trashed: true } })
     await sql`delete from inspection_videos where id = ${rowId}`
 
     console.log(
-      `Done. ${uploadResults.length} segment(s) uploaded, original deleted. ` +
+      `Done. ${uploadResults.length} segment(s) uploaded, original trashed. ` +
       `Run "Check for new videos" on the inspection to pick them up.`
     )
   } finally {
