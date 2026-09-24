@@ -42,6 +42,20 @@ export async function GET() {
     result.ffmpegStaticDirError = (err as Error).message
   }
 
+  const { readdirSync, existsSync: exists2 } = await import('node:fs')
+  const probe = (p: string) => {
+    try {
+      return { exists: true, entries: readdirSync(p).slice(0, 50) }
+    } catch (err) {
+      return { exists: exists2(p), error: (err as Error).message }
+    }
+  }
+  result.varTask = probe('/var/task')
+  result.varTaskDashboard = probe('/var/task/dashboard')
+  result.varTaskDashboardNodeModules = probe('/var/task/dashboard/node_modules')
+  result.rootDashboard = probe('/ROOT/dashboard')
+  result.rootDashboardNodeModules = probe('/ROOT/dashboard/node_modules')
+
   if (ffmpegPath) {
     result.exists = existsSync(ffmpegPath)
     if (result.exists) {
