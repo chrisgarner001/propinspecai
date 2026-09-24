@@ -1,8 +1,4 @@
 import { GoogleGenAI, createPartFromUri, createUserContent, Type, type Schema } from '@google/genai'
-import { writeFile, unlink } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
 
 // Model is configurable via env var, not hardcoded -- Gemini model ids change
 // frequently (2.5 Pro/Flash/Flash-Lite are already scheduled to shut down
@@ -89,17 +85,6 @@ Classification notes: painting is vendor-scope as a whole category, not just "la
 
 Return one entry per distinct inspected item/finding via the structured schema. Use "Unable to determine" for source_timestamp only when genuinely not clear from the video.`
 
-async function uploadVideoBuffer(client: GoogleGenAI, buffer: Buffer, filename: string) {
-  const tempPath = join(tmpdir(), `propinspec-${randomUUID()}-${filename}`)
-  await writeFile(tempPath, buffer)
-  try {
-    const uploaded = await client.files.upload({ file: tempPath, config: { mimeType: 'video/mp4' } })
-    return uploaded
-  } finally {
-    await unlink(tempPath).catch(() => {})
-  }
-}
-
 async function waitForFileActive(client: GoogleGenAI, name: string) {
   let file = await client.files.get({ name })
   const deadline = Date.now() + 4 * 60_000 // Gemini Files typically go ACTIVE in seconds to low minutes for clips this length
@@ -148,11 +133,14 @@ async function generateContentWithRetry(
   throw new Error('unreachable') // satisfies TS control-flow analysis; loop always returns or throws
 }
 
-// Downloads happen by the caller (Drive access lives in lib/google.ts); this
-// takes raw video bytes so it has no dependency on where they came from.
-export async function extractLineItemsFromVideo(videoBuffer: Buffer, filename: string): Promise<ExtractedLineItem[]> {
+// Downloads happen by the caller (Drive access lives in lib/google.ts) --
+// takes a path to an already-downloaded file on disk, not a Buffer
+// (plan-eng-review, 2026-09-24): the caller streams the video to one shared
+// temp file, reused here and for ffmpeg, instead of this function writing
+// its own second copy. `client.files.upload` reads the path directly.
+export async function extractLineItemsFromVideo(videoPath: string): Promise<ExtractedLineItem[]> {
   const client = getClient()
-  const uploaded = await uploadVideoBuffer(client, videoBuffer, filename)
+  const uploaded = await client.files.upload({ file: videoPath, config: { mimeType: 'video/mp4' } })
   if (!uploaded.name) throw new Error('Gemini did not return a file name for the uploaded video.')
 
   try {

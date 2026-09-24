@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi, afterEach } from 'vitest'
 import { getSql } from '@/lib/db'
+import { access, writeFile } from 'node:fs/promises'
 import { duplicateLineItem, updateLineItemSchedule, syncInspectionVideos, processNextInspectionVideo, retryInspectionVideo } from './actions'
 
 // revalidatePath relies on Next's request-scoped static-generation store,
@@ -39,14 +40,22 @@ vi.mock('@/lib/embeddings', () => ({
 // (pending -> processing -> done/failed, line items inserted or not), not
 // real network calls to Google's APIs. parseFolderIdFromUrl is real (pure
 // regex, no reason to fake it).
-const mockDownloadDriveFile = vi.fn()
+//
+// mockDownloadDriveFileToPath actually writes a real file to the given path
+// by default (large-video plan-eng-review, 2026-09-24, D5's regression
+// contract) -- proves processNextInspectionVideo passes a real, existing
+// file path to extractLineItemsFromVideo/getVideoCreationTime/extractFrame,
+// not a Buffer, not a path to nothing.
+const mockDownloadDriveFileToPath = vi.fn(async (_fileId: string, destPath: string) => {
+  await writeFile(destPath, 'fake video bytes, streamed not buffered')
+})
 const mockListVideosInFolder = vi.fn()
 const mockExtractLineItemsFromVideo = vi.fn()
 vi.mock('@/lib/google', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/google')>()
   return {
     ...actual,
-    downloadDriveFile: (...args: unknown[]) => mockDownloadDriveFile(...args),
+    downloadDriveFileToPath: (...args: [string, string]) => mockDownloadDriveFileToPath(...args),
     listVideosInFolder: (...args: unknown[]) => mockListVideosInFolder(...args),
   }
 })
@@ -173,7 +182,7 @@ describe('updateLineItemSchedule', () => {
 
 describe('video processing pipeline', () => {
   afterEach(() => {
-    mockDownloadDriveFile.mockReset()
+    mockDownloadDriveFileToPath.mockClear()
     mockListVideosInFolder.mockReset()
     mockExtractLineItemsFromVideo.mockReset()
   })
@@ -197,14 +206,19 @@ describe('video processing pipeline', () => {
     `
     const withFolderId = row.id as string
     mockListVideosInFolder.mockResolvedValue([
-      { id: 'file-1', name: 'clip1.mp4', mimeType: 'video/mp4' },
-      { id: 'file-2', name: 'clip2.mp4', mimeType: 'video/mp4' },
+      { id: 'file-1', name: 'clip1.mp4', mimeType: 'video/mp4', size: '1000000' },
+      { id: 'file-2', name: 'clip2.mp4', mimeType: 'video/mp4', size: '2000000' },
     ])
 
     const result = await syncInspectionVideos(withFolderId)
     expect(result.error).toBeUndefined()
     expect(result.videos).toHaveLength(2)
     expect(result.videos?.every((v) => v.status === 'pending')).toBe(true)
+
+    // size_bytes (plan-eng-review, 2026-09-24) is captured at sync time from
+    // Drive's own reported size, so the pre-flight check has real data.
+    const [synced] = await sql`select size_bytes from inspection_videos where drive_file_id = 'file-1'`
+    expect(Number(synced.size_bytes)).toBe(1000000)
 
     // Calling again shouldn't duplicate rows (on conflict do nothing).
     const second = await syncInspectionVideos(withFolderId)
@@ -215,24 +229,31 @@ describe('video processing pipeline', () => {
 
   it('processNextInspectionVideo inserts extracted line items and marks the video done', async () => {
     const [video] = await sql`
-      insert into inspection_videos (inspection_id, drive_file_id, filename)
-      values (${inspectionId}, 'file-happy', 'happy.mp4')
+      insert into inspection_videos (inspection_id, drive_file_id, filename, size_bytes)
+      values (${inspectionId}, 'file-happy', 'happy.mp4', 387322733)
       returning id
     `
-    mockDownloadDriveFile.mockResolvedValue(Buffer.from('fake video bytes'))
-    mockExtractLineItemsFromVideo.mockResolvedValue([
-      {
-        room_area: 'Kitchen',
-        item: 'Cabinet hardware',
-        condition: 'Fair',
-        observed_evidence: 'Loose handle on lower cabinet',
-        recommended_action: 'Tighten hardware',
-        trade_category: 'general maintenance',
-        assigned_to: 'GPM Staff',
-        priority: 'Routine turnover',
-        source_timestamp: '0:42',
-      },
-    ])
+    // D5's regression contract: prove extractLineItemsFromVideo received a
+    // real, existing file path (the new streaming-to-path plumbing), not a
+    // Buffer and not a path to nothing -- fs.access throws if it's wrong.
+    let extractLineItemsCalledWithPath: string | undefined
+    mockExtractLineItemsFromVideo.mockImplementation(async (videoPath: string) => {
+      extractLineItemsCalledWithPath = videoPath
+      await access(videoPath)
+      return [
+        {
+          room_area: 'Kitchen',
+          item: 'Cabinet hardware',
+          condition: 'Fair',
+          observed_evidence: 'Loose handle on lower cabinet',
+          recommended_action: 'Tighten hardware',
+          trade_category: 'general maintenance',
+          assigned_to: 'GPM Staff',
+          priority: 'Routine turnover',
+          source_timestamp: '0:42',
+        },
+      ]
+    })
 
     const result = await processNextInspectionVideo(inspectionId)
     expect(result.done).toBe(true)
@@ -240,19 +261,52 @@ describe('video processing pipeline', () => {
     expect(row?.status).toBe('done')
     expect(row?.line_items_created).toBe(1)
 
+    expect(typeof extractLineItemsCalledWithPath).toBe('string')
+    expect(mockDownloadDriveFileToPath).toHaveBeenCalledWith('file-happy', extractLineItemsCalledWithPath)
+
     const [inserted] = await sql`select * from line_items where inspection_id = ${inspectionId} and source_video_file = 'happy.mp4'`
     expect(inserted.room_area).toBe('Kitchen')
     expect(inserted.assigned_to).toBe('GPM Staff')
     expect(inserted.is_manual_addition).toBe(false)
   })
 
-  it('marks the video failed with the real error message on extraction failure, and retry lets it run again', async () => {
+  it('rejects a video over the ~400MB threshold immediately, without attempting a download', async () => {
     const [video] = await sql`
-      insert into inspection_videos (inspection_id, drive_file_id, filename)
-      values (${inspectionId}, 'file-sad', 'sad.mp4')
+      insert into inspection_videos (inspection_id, drive_file_id, filename, size_bytes)
+      values (${inspectionId}, 'file-toobig', 'toobig.mov', 2087247388)
       returning id
     `
-    mockDownloadDriveFile.mockResolvedValue(Buffer.from('fake video bytes'))
+
+    const result = await processNextInspectionVideo(inspectionId)
+    const row = result.videos.find((v) => v.id === video.id)
+    expect(row?.status).toBe('failed')
+    expect(row?.error_message).toMatch(/too large/i)
+    expect(row?.error_message).toContain('1991MB') // 2087247388 bytes, the real IMG_0014.MOV size
+    expect(mockDownloadDriveFileToPath).not.toHaveBeenCalled()
+    expect(mockExtractLineItemsFromVideo).not.toHaveBeenCalled()
+  })
+
+  it('fails closed with an actionable message when size_bytes is unknown (not yet backfilled)', async () => {
+    const [video] = await sql`
+      insert into inspection_videos (inspection_id, drive_file_id, filename)
+      values (${inspectionId}, 'file-unknown-size', 'unknown.mp4')
+      returning id
+    `
+
+    const result = await processNextInspectionVideo(inspectionId)
+    const row = result.videos.find((v) => v.id === video.id)
+    expect(row?.status).toBe('failed')
+    expect(row?.error_message).toMatch(/size is unknown/i)
+    expect(mockDownloadDriveFileToPath).not.toHaveBeenCalled()
+    expect(mockExtractLineItemsFromVideo).not.toHaveBeenCalled()
+  })
+
+  it('marks the video failed with the real error message on extraction failure, and retry lets it run again', async () => {
+    const [video] = await sql`
+      insert into inspection_videos (inspection_id, drive_file_id, filename, size_bytes)
+      values (${inspectionId}, 'file-sad', 'sad.mp4', 387322733)
+      returning id
+    `
     mockExtractLineItemsFromVideo.mockRejectedValue(new Error('Gemini returned an empty response.'))
 
     const result = await processNextInspectionVideo(inspectionId)
@@ -279,12 +333,11 @@ describe('video processing pipeline', () => {
   // inserting a row directly at that status without ever calling process.
   it('retry also recovers a video stuck at processing (e.g. a killed serverless function)', async () => {
     const [stuck] = await sql`
-      insert into inspection_videos (inspection_id, drive_file_id, filename, status)
-      values (${inspectionId}, 'file-stuck', 'stuck.mp4', 'processing')
+      insert into inspection_videos (inspection_id, drive_file_id, filename, status, size_bytes)
+      values (${inspectionId}, 'file-stuck', 'stuck.mp4', 'processing', 387322733)
       returning id
     `
 
-    mockDownloadDriveFile.mockResolvedValue(Buffer.from('fake video bytes'))
     mockExtractLineItemsFromVideo.mockResolvedValue([])
     const retried = await retryInspectionVideo(stuck.id as string, inspectionId)
     expect(retried.videos.find((v) => v.id === stuck.id)?.status).toBe('pending')

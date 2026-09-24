@@ -27,3 +27,46 @@
 **Effort:** M
 **Priority:** P4
 **Depends on:** Job Timeline shipping and seeing real multi-dependency usage
+
+## Video Processing
+
+### Automatic in-app video chunking
+
+**What:** Split one long video into segments processed across multiple requests,
+removing the ~400MB pre-flight size ceiling entirely.
+
+**Why:** Today, a video over ~400MB must be re-shot or manually split by the inspector
+before upload; this would remove that constraint in-app.
+
+**Context:** Deferred during the 2026-09-24 large-video plan-eng-review because the
+shoot-shorter-clips workaround already covers it at zero engineering cost, and the
+existing per-video polling loop (`VideoProcessingPanel.tsx` + `inspection_videos`'
+pending/processing/done/failed state machine) already provides equivalent behavior for
+separately-shot clips. Worth building only if real GPM usage shows the manual workaround
+is a recurring pain — not speculative work.
+
+**Effort:** L
+**Priority:** P4
+**Depends on:** None
+
+### Zero-disk-footprint video streaming
+
+**What:** Make Gemini upload + ffmpeg operate directly on a stream/URL, never touching
+local `/tmp`, to raise the safe video-size ceiling closer to Gemini's real 2GB
+Files API cap.
+
+**Why:** The ~400MB threshold is set by Vercel's real, measured ~512MB `/tmp` capacity
+(confirmed live 2026-09-24 via a temporary diagnostic route against production —
+`statfs` reported ~513MB available, writes failed with `ENOSPC` past 512MB), not by
+Gemini's own 2GB per-file limit. Removing the `/tmp` dependency could support roughly
+5x larger videos.
+
+**Context:** Real, unconfirmed engineering risk — the installed `@google/genai` SDK's
+`uploadFile(file: string | Blob, ...)` (node_modules/@google/genai/dist/node/node.d.ts:454)
+doesn't document Readable-stream support, and ffmpeg's seek behavior (`-ss` + frame
+extraction) on a live stream/URL needs its own real verification before committing to
+it. Don't start this speculatively — confirm SDK/ffmpeg streaming support first.
+
+**Effort:** L
+**Priority:** P4
+**Depends on:** Confirming SDK/ffmpeg streaming support first

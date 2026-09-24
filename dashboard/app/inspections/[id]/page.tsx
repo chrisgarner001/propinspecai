@@ -18,8 +18,13 @@ import type { InspectionVideoRow } from '@/app/actions'
 // Raised from the platform default for processNextInspectionVideo (called
 // from this page via VideoProcessingPanel) -- downloading a multi-minute
 // clip from Drive and waiting on Gemini's analysis can take well over a
-// minute per video. Confirmed on Vercel Pro, which allows up to 300s.
-export const maxDuration = 300
+// minute per video. Confirmed on Vercel Pro (allows up to 800s standard
+// maximum). Raised from 300 to 800 (plan-eng-review, 2026-09-24, D6): the
+// pipeline's own waitForFileActive (lib/gemini.ts) alone budgets up to 240s
+// for Gemini's file-activation step, a real wall-clock risk separate from
+// the disk-space fix this same review made -- more headroom here is cheap
+// and doesn't substitute for that fix, just complements it.
+export const maxDuration = 800
 
 const CONDITIONS = ['Good', 'Fair', 'Damaged', 'Not Rated']
 

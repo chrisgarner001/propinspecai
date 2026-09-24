@@ -3,7 +3,7 @@
 import { getSql } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { parseFolderIdFromUrl, listVideosInFolder, downloadDriveFile } from '@/lib/google'
+import { parseFolderIdFromUrl, listVideosInFolder, downloadDriveFileToPath } from '@/lib/google'
 import { extractLineItemsFromVideo } from '@/lib/gemini'
 import { parseTimestampSeconds, extractFrame, uploadStill, getVideoCreationTime } from '@/lib/stills'
 import { askHelpAssistant, type HelpMessage } from '@/lib/helpAssistant'
@@ -1198,6 +1198,14 @@ export type InspectionVideoRow = {
   line_items_created: number
 }
 
+// Real, measured ceiling (plan-eng-review, 2026-09-24): a temporary diagnostic
+// route deployed to this exact production app measured Vercel's /tmp at
+// ~513MB available, with writes failing (ENOSPC) past 512MB. This is well
+// below Gemini's own 2GB Files API cap -- /tmp is the actual governing
+// constraint for "stream one video to one temp file", not Gemini's limit.
+// Set with real safety margin below the measured 512MB.
+const MAX_VIDEO_SIZE_BYTES = 400 * 1024 * 1024 // ~400MB
+
 // Lists the video files in the inspection's linked Drive folder and adds any
 // not already tracked -- safe to call repeatedly (e.g. if more clips get
 // added to the folder after the first pass). Does not process anything
@@ -1227,9 +1235,15 @@ export async function syncInspectionVideos(inspectionId: string): Promise<{ erro
   }
 
   for (const file of files) {
+    // size_bytes (plan-eng-review, 2026-09-24): captured once at sync time so
+    // processNextInspectionVideo can pre-flight reject an oversized video
+    // without a second Drive API call. `on conflict do nothing` means this
+    // only ever populates NEW rows -- scripts/backfill-video-sizes.mjs fills
+    // in rows synced before this migration.
+    const sizeBytes = file.size ? Number(file.size) : null
     await sql`
-      insert into inspection_videos (inspection_id, drive_file_id, filename)
-      values (${inspectionId}, ${file.id}, ${file.name})
+      insert into inspection_videos (inspection_id, drive_file_id, filename, size_bytes)
+      values (${inspectionId}, ${file.id}, ${file.name}, ${sizeBytes})
       on conflict (inspection_id, drive_file_id) do nothing
     `
   }
@@ -1253,74 +1267,95 @@ export async function processNextInspectionVideo(inspectionId: string): Promise<
   await requireSessionOrThrow()
   const sql = getSql()
   const [next] = await sql`
-    select id, drive_file_id, filename from inspection_videos
+    select id, drive_file_id, filename, size_bytes from inspection_videos
     where inspection_id = ${inspectionId} and status = 'pending'
     order by created_at
     limit 1
   `
 
   if (next) {
-    await sql`update inspection_videos set status = 'processing' where id = ${next.id}`
-
-    try {
-      const buffer = await downloadDriveFile(next.drive_file_id)
-      const extracted = await extractLineItemsFromVideo(buffer, next.filename)
-
-      // Video is written to disk once and reused across every still-frame
-      // extraction below (rather than re-writing the buffer per line item) --
-      // some of these clips are 100s of MB.
-      const videoTempPath = join(tmpdir(), `propinspec-video-${randomUUID()}.mp4`)
-      await writeFile(videoTempPath, buffer)
-      // One creation_time per video, not per frame -- see getVideoCreationTime's
-      // own comment for why GPS isn't available but this is. Null on any
-      // video lacking the tag; captured_at then just stays null for its stills.
-      const creationTime = await getVideoCreationTime(videoTempPath).catch(() => null)
+    // Pre-flight size check (plan-eng-review, 2026-09-24) -- rejects before
+    // ever attempting a download, matching this pipeline's existing "fail
+    // loudly" principle. size_bytes is NULL for a row synced before this
+    // migration and not yet covered by scripts/backfill-video-sizes.mjs;
+    // fails closed rather than guessing (D7).
+    if (next.size_bytes === null) {
+      await sql`
+        update inspection_videos
+        set status = 'failed', error_message = 'This video''s size is unknown -- click "Check for new videos" to refresh it, then retry.'
+        where id = ${next.id}
+      `
+    } else if (Number(next.size_bytes) > MAX_VIDEO_SIZE_BYTES) {
+      const mb = Math.round(Number(next.size_bytes) / 1024 / 1024)
+      await sql`
+        update inspection_videos
+        set status = 'failed', error_message = ${`This video is too large (${mb}MB) to process -- the server can safely handle up to ~400MB. Please re-shoot or split it into shorter clips.`}
+        where id = ${next.id}
+      `
+    } else {
+      await sql`update inspection_videos set status = 'processing' where id = ${next.id}`
 
       try {
-        for (const li of extracted) {
-          const [{ id: lineItemId }] = await sql`
-            insert into line_items (
-              inspection_id, room_area, item, condition, observed_evidence, recommended_action,
-              trade_category, assigned_to, priority, source_timestamp, source_video_file, source_video_drive_file_id, is_manual_addition
-            )
-            values (
-              ${inspectionId}, ${li.room_area}, ${li.item}, ${li.condition}, ${li.observed_evidence}, ${li.recommended_action},
-              ${li.trade_category}, ${li.assigned_to}, ${li.priority}, ${li.source_timestamp}, ${next.filename}, ${next.drive_file_id}, false
-            )
-            returning id
-          `
+        // Streamed to ONE temp file, reused below for both the Gemini upload
+        // and every ffmpeg call -- the prior version buffered the whole video
+        // in memory, then wrote it to disk a SECOND time inside
+        // extractLineItemsFromVideo, and a THIRD time here for ffmpeg. Real
+        // memory/disk savings, not just tidiness (plan-eng-review, 2026-09-24).
+        const videoTempPath = join(tmpdir(), `propinspec-video-${randomUUID()}.mp4`)
+        await downloadDriveFileToPath(next.drive_file_id, videoTempPath)
+        const extracted = await extractLineItemsFromVideo(videoTempPath)
 
-          // Best-effort: a still is a nice-to-have on top of the line item,
-          // not a requirement -- EvidenceStill already renders a graceful
-          // "No still extracted yet" placeholder, so a failure here should
-          // never take down the line item (or the whole video) with it.
-          const seconds = parseTimestampSeconds(li.source_timestamp)
-          if (seconds !== null) {
-            try {
-              const frame = await extractFrame(videoTempPath, seconds)
-              const url = await uploadStill(frame, `${lineItemId}.jpg`)
-              const capturedAt = creationTime ? new Date(creationTime.getTime() + seconds * 1000) : null
-              await sql`update line_items set still_image_file = ${url}, captured_at = ${capturedAt} where id = ${lineItemId}`
-            } catch (stillErr) {
-              console.error(`Still extraction failed for line item ${lineItemId}:`, (stillErr as Error).message)
+        // One creation_time per video, not per frame -- see getVideoCreationTime's
+        // own comment for why GPS isn't available but this is. Null on any
+        // video lacking the tag; captured_at then just stays null for its stills.
+        const creationTime = await getVideoCreationTime(videoTempPath).catch(() => null)
+
+        try {
+          for (const li of extracted) {
+            const [{ id: lineItemId }] = await sql`
+              insert into line_items (
+                inspection_id, room_area, item, condition, observed_evidence, recommended_action,
+                trade_category, assigned_to, priority, source_timestamp, source_video_file, source_video_drive_file_id, is_manual_addition
+              )
+              values (
+                ${inspectionId}, ${li.room_area}, ${li.item}, ${li.condition}, ${li.observed_evidence}, ${li.recommended_action},
+                ${li.trade_category}, ${li.assigned_to}, ${li.priority}, ${li.source_timestamp}, ${next.filename}, ${next.drive_file_id}, false
+              )
+              returning id
+            `
+
+            // Best-effort: a still is a nice-to-have on top of the line item,
+            // not a requirement -- EvidenceStill already renders a graceful
+            // "No still extracted yet" placeholder, so a failure here should
+            // never take down the line item (or the whole video) with it.
+            const seconds = parseTimestampSeconds(li.source_timestamp)
+            if (seconds !== null) {
+              try {
+                const frame = await extractFrame(videoTempPath, seconds)
+                const url = await uploadStill(frame, `${lineItemId}.jpg`)
+                const capturedAt = creationTime ? new Date(creationTime.getTime() + seconds * 1000) : null
+                await sql`update line_items set still_image_file = ${url}, captured_at = ${capturedAt} where id = ${lineItemId}`
+              } catch (stillErr) {
+                console.error(`Still extraction failed for line item ${lineItemId}:`, (stillErr as Error).message)
+              }
             }
           }
+        } finally {
+          await unlink(videoTempPath).catch(() => {})
         }
-      } finally {
-        await unlink(videoTempPath).catch(() => {})
-      }
 
-      await sql`
-        update inspection_videos
-        set status = 'done', line_items_created = ${extracted.length}, error_message = null
-        where id = ${next.id}
-      `
-    } catch (err) {
-      await sql`
-        update inspection_videos
-        set status = 'failed', error_message = ${(err as Error).message}
-        where id = ${next.id}
-      `
+        await sql`
+          update inspection_videos
+          set status = 'done', line_items_created = ${extracted.length}, error_message = null
+          where id = ${next.id}
+        `
+      } catch (err) {
+        await sql`
+          update inspection_videos
+          set status = 'failed', error_message = ${(err as Error).message}
+          where id = ${next.id}
+        `
+      }
     }
   }
 

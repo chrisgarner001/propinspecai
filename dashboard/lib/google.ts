@@ -1,4 +1,7 @@
 import { google } from 'googleapis'
+import { createWriteStream } from 'node:fs'
+import { unlink } from 'node:fs/promises'
+import { pipeline } from 'node:stream/promises'
 
 // Service account credentials come from an env var (GOOGLE_SERVICE_ACCOUNT_JSON),
 // same pattern as DATABASE_URL -- works identically in local dev and on Vercel.
@@ -46,21 +49,42 @@ export async function listVideosInFolder(folderId: string) {
     )
   }
 
+  // `size` (docs/designs plan-eng-review, 2026-09-24): lets callers pre-flight
+  // reject an oversized video before ever attempting a download -- see
+  // downloadDriveFileToPath below for why the download itself must never
+  // buffer the whole file.
   const res = await drive.files.list({
     q: `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`,
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
-    fields: 'files(id, name, mimeType)',
+    fields: 'files(id, name, mimeType, size)',
   })
-  return (res.data.files ?? []) as { id: string; name: string; mimeType: string }[]
+  return (res.data.files ?? []) as { id: string; name: string; mimeType: string; size?: string }[]
 }
 
-export async function downloadDriveFile(fileId: string): Promise<Buffer> {
+// Streams the Drive file directly to destPath rather than buffering it in
+// memory (the prior downloadDriveFile did `responseType: 'arraybuffer'`,
+// holding the entire video as a Buffer -- a real risk against Vercel's
+// 2GB(Hobby)/4GB(Pro) function memory ceiling for anything multi-hundred-MB).
+// Confirmed live against this deployment's real /tmp capacity (2026-09-24,
+// plan-eng-review): ~513MB available, ENOSPC past 512MB -- callers must
+// pre-flight check size against that ceiling before calling this, since a
+// mid-write ENOSPC here is a real, expected failure mode, not a bug.
+export async function downloadDriveFileToPath(fileId: string, destPath: string): Promise<void> {
   const auth = getGoogleAuth()
   const drive = google.drive({ version: 'v3', auth })
   const res = await drive.files.get(
     { fileId, alt: 'media', supportsAllDrives: true },
-    { responseType: 'arraybuffer' },
+    { responseType: 'stream' },
   )
-  return Buffer.from(res.data as ArrayBuffer)
+  try {
+    await pipeline(res.data as NodeJS.ReadableStream, createWriteStream(destPath))
+  } catch (err) {
+    // A partial file from an interrupted stream (network blip, ENOSPC mid-
+    // write) must not linger -- a leftover partial file contributes to
+    // exhausting the same ~512MB /tmp ceiling for the NEXT video processed
+    // in this same warm serverless instance (plan-eng-review Failure modes).
+    await unlink(destPath).catch(() => {})
+    throw err
+  }
 }
