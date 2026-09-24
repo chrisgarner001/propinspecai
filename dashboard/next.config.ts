@@ -9,8 +9,13 @@ const nextConfig: NextConfig = {
   // video creation-time reads have silently failed (caught by their own
   // try/catch, no still ever produced) since this pipeline's first real
   // production run. Root cause investigated via /investigate.
+  // "/*" (single star) does NOT cross path segments under picomatch, so it
+  // only matches single-segment routes like /cost-book -- confirmed live
+  // (2026-09-24) it silently failed to cover /api/ffmpegdiag92384 or any
+  // /inspections/[id]/* route, which is exactly where this matters. "/**"
+  // matches every route including nested ones.
   outputFileTracingIncludes: {
-    "/*": ["./node_modules/ffmpeg-static/**"],
+    "/**": ["./node_modules/ffmpeg-static/**"],
   },
 };
 
