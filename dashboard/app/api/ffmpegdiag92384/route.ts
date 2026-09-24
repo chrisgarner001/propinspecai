@@ -22,6 +22,26 @@ export async function GET() {
     arch: process.arch,
   }
 
+  try {
+    const { stdout } = await execFileAsync('which', ['ffmpeg'])
+    result.systemFfmpegWhich = stdout.trim()
+  } catch (err) {
+    result.systemFfmpegWhich = null
+    result.systemFfmpegWhichError = (err as Error).message
+  }
+  for (const p of ['/usr/bin/ffmpeg', '/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg']) {
+    if (existsSync(p)) {
+      result.systemFfmpegFound = p
+      break
+    }
+  }
+  try {
+    const { readdirSync } = await import('node:fs')
+    result.ffmpegStaticDirContents = readdirSync('/ROOT/dashboard/node_modules/ffmpeg-static')
+  } catch (err) {
+    result.ffmpegStaticDirError = (err as Error).message
+  }
+
   if (ffmpegPath) {
     result.exists = existsSync(ffmpegPath)
     if (result.exists) {
