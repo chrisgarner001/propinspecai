@@ -28,6 +28,14 @@ import { randomUUID } from 'node:crypto'
 import ffmpegPath from 'ffmpeg-static'
 
 const execFileAsync = promisify(execFile)
+
+// Same regex as lib/google.ts's parseFolderIdFromUrl -- duplicated per the
+// established .mjs/.ts import-boundary convention (see upload-videos.mjs,
+// backfill-video-sizes.mjs).
+export function parseFolderIdFromUrl(url) {
+  const match = url.match(/folders\/([a-zA-Z0-9_-]+)/)
+  return match ? match[1] : null
+}
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 // ~5min segments via ffmpeg's own segment muxer -- fixed time-based split,
@@ -59,8 +67,9 @@ async function main() {
   }
 
   const { DATABASE_URL, GOOGLE_SERVICE_ACCOUNT_JSON } = loadEnv()
+  const credentials = JSON.parse(GOOGLE_SERVICE_ACCOUNT_JSON)
   const auth = new google.auth.GoogleAuth({
-    credentials: JSON.parse(GOOGLE_SERVICE_ACCOUNT_JSON),
+    credentials,
     scopes: ['https://www.googleapis.com/auth/drive'],
   })
   const drive = google.drive({ version: 'v3', auth })
@@ -68,8 +77,11 @@ async function main() {
 
   try {
     const [row] = await sql`
-      select id, inspection_id, drive_file_id, filename, status, error_message
-      from inspection_videos where id = ${rowId}
+      select iv.id, iv.inspection_id, iv.drive_file_id, iv.filename, iv.status, iv.error_message,
+             i.source_video_drive_folder_url
+      from inspection_videos iv
+      join inspections i on i.id = iv.inspection_id
+      where iv.id = ${rowId}
     `
     if (!row) throw new Error(`No inspection_videos row found for id ${rowId}`)
 
@@ -86,13 +98,22 @@ async function main() {
 
     console.log(`Splitting ${row.filename} (row ${rowId})...`)
 
-    const { data: fileMeta } = await drive.files.get({
-      fileId: row.drive_file_id,
-      supportsAllDrives: true,
-      fields: 'parents',
-    })
-    const parentId = fileMeta.parents?.[0]
-    if (!parentId) throw new Error(`Could not resolve a parent Drive folder for ${row.drive_file_id}`)
+    // Use the inspection's own linked folder as the re-upload target,
+    // rather than asking Drive for the file's `parents` (investigated
+    // 2026-09-28: for a file the service account can only see via a direct
+    // share -- not real membership in its Shared Drive -- `files.get`
+    // silently omits `parents` entirely, even though the file has a real
+    // parent. capabilities.canReadDrive: false confirmed this is that kind
+    // of access. The inspection's linked folder is the same one
+    // listVideosInFolder already reads from, so it's already proven correct
+    // and doesn't depend on this same fragile field).
+    const parentId = parseFolderIdFromUrl(row.source_video_drive_folder_url)
+    if (!parentId) {
+      throw new Error(
+        `Could not parse a Drive folder ID from this inspection's source_video_drive_folder_url ` +
+        `(${row.source_video_drive_folder_url})`
+      )
+    }
 
     const localPath = join(tmpdir(), `propinspec-split-${randomUUID()}.mp4`)
     console.log('Downloading original from Drive...')
@@ -159,6 +180,24 @@ async function main() {
       } catch (err) {
         uploadResults.push({ fileId: null, name: segmentName, error: err.message })
         console.error(`  FAILED ${segmentName}: ${err.message}`)
+        // Fail fast on a real permission gap (confirmed 2026-09-28: a folder
+        // shared only via "anyone with the link" grants read/list/download
+        // but not write, unlike a folder shared directly with the service
+        // account) -- every remaining segment would fail the exact same way,
+        // so stop here with an actionable message instead of burning the
+        // rest of the upload budget on doomed requests.
+        if (/insufficient permission/i.test(err.message)) {
+          for (const segFile of segmentFiles) {
+            try { unlinkSync(segFile) } catch {}
+          }
+          try { unlinkSync(localPath) } catch {}
+          throw new Error(
+            `Upload failed: insufficient permission on the Drive folder. This folder is likely shared as ` +
+            `"anyone with the link" (read-only), not directly with the service account. Share it with ` +
+            `${credentials.client_email} as an Editor/Content Manager, then re-run this script. ` +
+            `Original file and DB row are untouched.`
+          )
+        }
       }
     }
 

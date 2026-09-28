@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allUploadsConfirmed } from './split-video.mjs'
+import { allUploadsConfirmed, parseFolderIdFromUrl } from './split-video.mjs'
 
 // Regression coverage for the one step in split-video.mjs with real data-loss
 // consequences if wrong: this guard gates deleting the only copy of the
@@ -31,5 +31,23 @@ describe('allUploadsConfirmed', () => {
       { fileId: 'ghi789', name: 'clip-part3.mp4' },
     ]
     expect(allUploadsConfirmed(results)).toBe(true)
+  })
+})
+
+// Regression coverage for the "9355 Sylvia" incident (investigated
+// 2026-09-28): a Drive file the service account can only see via a direct
+// share -- not real Shared Drive membership -- silently omits `parents`
+// from files.get, even though the file has a real parent. Fixed by using
+// the inspection's own linked folder URL as the re-upload target instead
+// of asking Drive to derive it from the file.
+describe('parseFolderIdFromUrl', () => {
+  it('extracts the folder id from a real Drive folder URL', () => {
+    expect(parseFolderIdFromUrl('https://drive.google.com/drive/folders/1cU49X0csidHMzRPaUPO9NPMVeKp4D-df?usp=sharing')).toBe(
+      '1cU49X0csidHMzRPaUPO9NPMVeKp4D-df'
+    )
+  })
+
+  it('returns null for a URL with no folder id', () => {
+    expect(parseFolderIdFromUrl('https://drive.google.com/drive/my-drive')).toBeNull()
   })
 })
