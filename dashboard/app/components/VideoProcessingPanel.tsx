@@ -30,6 +30,7 @@ export default function VideoProcessingPanel({
   const [collapsed, setCollapsed] = useState(true)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [copyFallbackId, setCopyFallbackId] = useState<string | null>(null)
+  const [gateCheckBanner, setGateCheckBanner] = useState<string | null>(null)
   const router = useRouter()
 
   const total = videos.length
@@ -57,13 +58,31 @@ export default function VideoProcessingPanel({
   async function handleStart() {
     setRunning(true)
     setBannerError(null)
+    setGateCheckBanner(null)
     const result = await syncInspectionVideos(inspectionId)
     if (result.error) {
       setBannerError(result.error)
       setRunning(false)
       return
     }
-    setVideos(result.videos ?? [])
+    const syncedVideos = result.videos ?? []
+    setVideos(syncedVideos)
+
+    // Gate check (plan-eng-review, 2026-09-28): syncInspectionVideos already
+    // marks any oversized video 'failed' immediately -- surface that here,
+    // before Start Processing even runs, instead of only discovering it
+    // per-row deep in the list as the queue happens to reach it.
+    const oversized = syncedVideos.filter((v) => v.status === 'failed' && v.error_message?.includes(SIZE_REJECTION_MARKER))
+    if (oversized.length > 0) {
+      const noun = oversized.length === 1 ? 'video' : 'videos'
+      const verb = oversized.length === 1 ? 'is' : 'are'
+      setGateCheckBanner(
+        `${oversized.length} of ${syncedVideos.length} ${noun} ${verb} too large to process automatically. ` +
+          `Use "Copy split command" below to split ${oversized.length === 1 ? 'it' : 'them'}, then click "Check for new videos" again.`
+      )
+      setCollapsed(false) // so the banner's Copy split command buttons are visible without an extra click
+    }
+
     await runLoop()
   }
 
@@ -133,6 +152,11 @@ export default function VideoProcessingPanel({
       )}
 
       {bannerError && <div className="basis-full text-[12px] text-error">{bannerError}</div>}
+      {gateCheckBanner && (
+        <div className="basis-full text-[12px] text-accent-ink bg-accent-bg rounded-[var(--radius-sm)] px-3 py-2">
+          {gateCheckBanner}
+        </div>
+      )}
 
       {!collapsed && total > 0 && (
         <div className="basis-full space-y-3 pt-2">

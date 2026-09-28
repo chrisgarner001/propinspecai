@@ -227,6 +227,86 @@ describe('video processing pipeline', () => {
     await sql`delete from inspections where id = ${withFolderId}`
   })
 
+  it('syncInspectionVideos gate check: marks an oversized video failed immediately, not lazily', async () => {
+    const [row] = await sql`
+      insert into inspections (job_number, property_address, inspection_date, inspector_name, source_video_drive_folder_url)
+      values ('VITEST', 'Vitest Gate Check', '2026-01-01', 'Vitest', 'https://drive.google.com/drive/folders/abc123')
+      returning id
+    `
+    mockListVideosInFolder.mockResolvedValue([
+      { id: 'file-small', name: 'small.mp4', mimeType: 'video/mp4', size: '1000000' },
+      { id: 'file-big', name: 'big.mp4', mimeType: 'video/mp4', size: String(600 * 1024 * 1024) },
+    ])
+
+    const result = await syncInspectionVideos(row.id as string)
+    const big = result.videos?.find((v) => v.filename === 'big.mp4')
+    const small = result.videos?.find((v) => v.filename === 'small.mp4')
+
+    // Failed immediately, in this same call -- not left 'pending' for
+    // processNextInspectionVideo's loop to discover later.
+    expect(big?.status).toBe('failed')
+    expect(big?.error_message).toMatch(/too large/i)
+    expect(big?.error_message).toContain('~480MB')
+    expect(mockDownloadDriveFileToPath).not.toHaveBeenCalled()
+
+    // The properly-sized video is untouched by the gate check.
+    expect(small?.status).toBe('pending')
+
+    await sql`delete from inspections where id = ${row.id}`
+  })
+
+  it('syncInspectionVideos gate check: leaves a null-size row pending, not failed', async () => {
+    const [row] = await sql`
+      insert into inspections (job_number, property_address, inspection_date, inspector_name, source_video_drive_folder_url)
+      values ('VITEST', 'Vitest Gate Check Null Size', '2026-01-01', 'Vitest', 'https://drive.google.com/drive/folders/abc123')
+      returning id
+    `
+    // Drive's own `size` field can be absent -- size_bytes then stays SQL
+    // NULL, and NULL > threshold is never true, so the gate check must not
+    // treat a null-size row as "fine" OR reject it; it stays pending for the
+    // existing lazy per-video null-size guard to handle on its own turn.
+    mockListVideosInFolder.mockResolvedValue([{ id: 'file-unknown', name: 'unknown.mp4', mimeType: 'video/mp4' }])
+
+    const result = await syncInspectionVideos(row.id as string)
+    const video = result.videos?.find((v) => v.filename === 'unknown.mp4')
+    expect(video?.status).toBe('pending')
+    expect(video?.error_message).toBeNull()
+
+    await sql`delete from inspections where id = ${row.id}`
+  })
+
+  it('syncInspectionVideos gate check: never touches a different inspection\'s rows', async () => {
+    const [inspectionA] = await sql`
+      insert into inspections (job_number, property_address, inspection_date, inspector_name, source_video_drive_folder_url)
+      values ('VITEST', 'Vitest Gate Check A', '2026-01-01', 'Vitest', 'https://drive.google.com/drive/folders/abc123')
+      returning id
+    `
+    const [inspectionB] = await sql`
+      insert into inspections (job_number, property_address, inspection_date, inspector_name)
+      values ('VITEST', 'Vitest Gate Check B', '2026-01-01', 'Vitest')
+      returning id
+    `
+    // Inspection B already has an oversized pending row from some earlier
+    // sync -- created directly, not via syncInspectionVideos, so this test
+    // doesn't depend on B having its own linked folder.
+    const [rowB] = await sql`
+      insert into inspection_videos (inspection_id, drive_file_id, filename, size_bytes)
+      values (${inspectionB.id}, 'file-b-big', 'b-big.mp4', ${600 * 1024 * 1024})
+      returning id
+    `
+
+    mockListVideosInFolder.mockResolvedValue([{ id: 'file-a-small', name: 'a-small.mp4', mimeType: 'video/mp4', size: '1000000' }])
+    await syncInspectionVideos(inspectionA.id as string)
+
+    const [stillPendingB] = await sql`select status, error_message from inspection_videos where id = ${rowB.id}`
+    expect(stillPendingB.status).toBe('pending')
+    expect(stillPendingB.error_message).toBeNull()
+
+    await sql`delete from inspection_videos where inspection_id = ${inspectionB.id}`
+    await sql`delete from inspections where id = ${inspectionA.id}`
+    await sql`delete from inspections where id = ${inspectionB.id}`
+  })
+
   it('processNextInspectionVideo inserts extracted line items and marks the video done', async () => {
     const [video] = await sql`
       insert into inspection_videos (inspection_id, drive_file_id, filename, size_bytes)

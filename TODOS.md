@@ -61,6 +61,15 @@ this check existed) and added a "Copy split command" button to
 direct DB lookup for the row id. This TODO's "recurring pain" trigger has now fired
 once, not established as recurring — still deferred.
 
+**Update (2026-09-28, gate-check plan-eng-review):** Real friction did recur (4
+manual `split-video.mjs` runs in one hour, including 2 real Drive-permission bugs
+fixed live). Chose the lighter fix over promoting this TODO: `syncInspectionVideos`
+now bulk-checks all video sizes immediately after the Drive folder syncs, instead of
+lazily as the processing queue reaches each video — Chris sees "N videos need
+splitting" up front, but the split itself is still manual. This TODO's own trigger
+("real server-side split infrastructure") is unchanged and still deferred; the gate
+check just moves WHEN the manual step is discovered, not who does it.
+
 **Effort:** L
 **Priority:** P4
 **Depends on:** None

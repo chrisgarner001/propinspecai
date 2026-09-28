@@ -1211,6 +1211,15 @@ export type InspectionVideoRow = {
 // ~32MB of margin below the measured ~512MB ceiling.
 const MAX_VIDEO_SIZE_BYTES = 480 * 1024 * 1024 // ~480MB
 
+// Shared by both the immediate gate check (syncInspectionVideos) and the
+// lazy per-video fallback (processNextInspectionVideo) so the two never
+// drift apart on wording or the advertised ceiling (plan-eng-review,
+// 2026-09-28 -- the 400->480MB bump already had to touch multiple copies).
+function sizeRejectionMessage(sizeBytes: number): string {
+  const mb = Math.round(sizeBytes / 1024 / 1024)
+  return `This video is ${SIZE_REJECTION_MARKER} (${mb}MB) to process -- the server can safely handle up to ~480MB. Please re-shoot, split it into shorter clips, or ask an admin to run the split script.`
+}
+
 // Lists the video files in the inspection's linked Drive folder and adds any
 // not already tracked -- safe to call repeatedly (e.g. if more clips get
 // added to the folder after the first pass). Does not process anything
@@ -1253,6 +1262,26 @@ export async function syncInspectionVideos(inspectionId: string): Promise<{ erro
     `
   }
 
+  // Gate check (plan-eng-review, 2026-09-28): flag oversized videos
+  // immediately, right after sync -- rather than lazily, one at a time, as
+  // the sequential processing loop happens to reach each row (which could
+  // be minutes behind a legitimately-large video ahead of it in the queue).
+  // Scoped to this inspection's still-'pending' rows only; a null size_bytes
+  // (Drive didn't return a size at sync time) never matches `>` against
+  // NULL in SQL, so it's correctly left for the existing lazy per-video
+  // null-size guard in processNextInspectionVideo, not silently skipped.
+  const oversized = await sql`
+    select id, size_bytes from inspection_videos
+    where inspection_id = ${inspectionId} and status = 'pending' and size_bytes > ${MAX_VIDEO_SIZE_BYTES}
+  `
+  for (const row of oversized) {
+    await sql`
+      update inspection_videos
+      set status = 'failed', error_message = ${sizeRejectionMessage(Number(row.size_bytes))}
+      where id = ${row.id}
+    `
+  }
+
   const videos = (await sql`
     select id, drive_file_id, filename, status, error_message, line_items_created
     from inspection_videos where inspection_id = ${inspectionId} order by created_at
@@ -1291,10 +1320,9 @@ export async function processNextInspectionVideo(inspectionId: string): Promise<
         where id = ${next.id}
       `
     } else if (Number(next.size_bytes) > MAX_VIDEO_SIZE_BYTES) {
-      const mb = Math.round(Number(next.size_bytes) / 1024 / 1024)
       await sql`
         update inspection_videos
-        set status = 'failed', error_message = ${`This video is ${SIZE_REJECTION_MARKER} (${mb}MB) to process -- the server can safely handle up to ~480MB. Please re-shoot, split it into shorter clips, or ask an admin to run the split script.`}
+        set status = 'failed', error_message = ${sizeRejectionMessage(Number(next.size_bytes))}
         where id = ${next.id}
       `
     } else {
