@@ -270,7 +270,7 @@ describe('video processing pipeline', () => {
     expect(inserted.is_manual_addition).toBe(false)
   })
 
-  it('rejects a video over the ~400MB threshold immediately, without attempting a download', async () => {
+  it('rejects a video over the ~480MB threshold immediately, without attempting a download', async () => {
     const [video] = await sql`
       insert into inspection_videos (inspection_id, drive_file_id, filename, size_bytes)
       values (${inspectionId}, 'file-toobig', 'toobig.mov', 2087247388)
@@ -282,8 +282,26 @@ describe('video processing pipeline', () => {
     expect(row?.status).toBe('failed')
     expect(row?.error_message).toMatch(/too large/i)
     expect(row?.error_message).toContain('1991MB') // 2087247388 bytes, the real IMG_0014.MOV size
+    expect(row?.error_message).toContain('~480MB')
     expect(mockDownloadDriveFileToPath).not.toHaveBeenCalled()
     expect(mockExtractLineItemsFromVideo).not.toHaveBeenCalled()
+  })
+
+  it('accepts a video just under the new ~480MB threshold that would have been rejected at the old ~400MB one', async () => {
+    // 450MB -- real regression coverage for the actual boundary move
+    // (plan-eng-review, 2026-09-28): over the old 400MB limit, under the new
+    // 480MB one.
+    mockExtractLineItemsFromVideo.mockResolvedValue([])
+    const [video] = await sql`
+      insert into inspection_videos (inspection_id, drive_file_id, filename, size_bytes)
+      values (${inspectionId}, 'file-450mb', '450mb.mp4', 471859200)
+      returning id
+    `
+
+    const result = await processNextInspectionVideo(inspectionId)
+    const row = result.videos.find((v) => v.id === video.id)
+    expect(row?.status).toBe('done')
+    expect(mockDownloadDriveFileToPath).toHaveBeenCalledWith('file-450mb', expect.any(String))
   })
 
   it('fails closed with an actionable message when size_bytes is unknown (not yet backfilled)', async () => {

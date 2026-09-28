@@ -1,4 +1,4 @@
-// Splits an oversized video (rejected by processNextInspectionVideo's ~400MB
+// Splits an oversized video (rejected by processNextInspectionVideo's ~480MB
 // pre-flight check, app/actions.ts) into fixed-length segments and re-uploads
 // them to the same Drive folder, so the app's existing per-video pipeline
 // processes each segment normally via its next "Check for new videos" sync.

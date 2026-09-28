@@ -2,7 +2,13 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { syncInspectionVideos, processNextInspectionVideo, retryInspectionVideo, type InspectionVideoRow } from '@/app/actions'
+import {
+  syncInspectionVideos,
+  processNextInspectionVideo,
+  retryInspectionVideo,
+  type InspectionVideoRow,
+} from '@/app/actions'
+import { SIZE_REJECTION_MARKER } from '@/lib/videoProcessing'
 
 const STATUS_LABEL: Record<string, string> = {
   pending: 'Queued',
@@ -22,6 +28,8 @@ export default function VideoProcessingPanel({
   const [running, setRunning] = useState(false)
   const [bannerError, setBannerError] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState(true)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [copyFallbackId, setCopyFallbackId] = useState<string | null>(null)
   const router = useRouter()
 
   const total = videos.length
@@ -63,6 +71,20 @@ export default function VideoProcessingPanel({
     const result = await retryInspectionVideo(videoRowId, inspectionId)
     setVideos(result.videos)
     await runLoop()
+  }
+
+  // navigator.clipboard.writeText can reject (permissions policy, older
+  // browser, non-secure context) -- falls back to a visible, select-to-copy
+  // text field rather than failing silently (plan-eng-review, 2026-09-28).
+  async function handleCopySplitCommand(videoRowId: string) {
+    const command = `node scripts/split-video.mjs ${videoRowId}`
+    try {
+      await navigator.clipboard.writeText(command)
+      setCopiedId(videoRowId)
+      setTimeout(() => setCopiedId((id) => (id === videoRowId ? null : id)), 2000)
+    } catch {
+      setCopyFallbackId(videoRowId)
+    }
   }
 
   const notStarted = total === 0
@@ -161,6 +183,20 @@ export default function VideoProcessingPanel({
                     Retry
                   </button>
                 )}
+                {/* Only on rows rejected specifically for size (not any other
+                    failure reason) -- scripts/split-video.mjs itself only
+                    handles this one case, running it against a different
+                    kind of failure would be pointless (plan-eng-review,
+                    2026-09-28). */}
+                {v.status === 'failed' && v.error_message?.includes(SIZE_REJECTION_MARKER) && (
+                  <button
+                    type="button"
+                    onClick={() => handleCopySplitCommand(v.id)}
+                    className="text-[11px] font-semibold text-accent hover:text-accent-hover"
+                  >
+                    {copiedId === v.id ? 'Copied!' : 'Copy split command'}
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -169,6 +205,24 @@ export default function VideoProcessingPanel({
             .map((v) => (
               <div key={`${v.id}-err`} className="text-[11px] text-error">
                 {v.filename}: {v.error_message}
+                {copyFallbackId === v.id && (
+                  <div className="mt-1 flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      readOnly
+                      value={`node scripts/split-video.mjs ${v.id}`}
+                      onFocus={(e) => e.target.select()}
+                      className="flex-1 min-w-0 border border-border rounded-[var(--radius-sm)] px-2 py-1 text-[11px] data-mono bg-surface text-text"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setCopyFallbackId(null)}
+                      className="text-[11px] font-semibold text-text-muted hover:text-text"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
         </div>

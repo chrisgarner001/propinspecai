@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import { parseFolderIdFromUrl, listVideosInFolder, downloadDriveFileToPath } from '@/lib/google'
 import { extractLineItemsFromVideo } from '@/lib/gemini'
 import { parseTimestampSeconds, extractFrame, uploadStill, getVideoCreationTime } from '@/lib/stills'
+import { SIZE_REJECTION_MARKER } from '@/lib/videoProcessing'
 import { askHelpAssistant, type HelpMessage } from '@/lib/helpAssistant'
 import { getPageContext } from '@/lib/helpContext'
 import { writeFile, unlink } from 'node:fs/promises'
@@ -1203,8 +1204,12 @@ export type InspectionVideoRow = {
 // ~513MB available, with writes failing (ENOSPC) past 512MB. This is well
 // below Gemini's own 2GB Files API cap -- /tmp is the actual governing
 // constraint for "stream one video to one temp file", not Gemini's limit.
-// Set with real safety margin below the measured 512MB.
-const MAX_VIDEO_SIZE_BYTES = 400 * 1024 * 1024 // ~400MB
+// Raised from 400MB to 480MB (plan-eng-review, 2026-09-28): real production
+// data showed only 1 of 22 processed videos ever exceeded 400MB, and one
+// historical 414MB video succeeded before this check existed at all -- real
+// evidence the old margin was more conservative than it needed to be. Keeps
+// ~32MB of margin below the measured ~512MB ceiling.
+const MAX_VIDEO_SIZE_BYTES = 480 * 1024 * 1024 // ~480MB
 
 // Lists the video files in the inspection's linked Drive folder and adds any
 // not already tracked -- safe to call repeatedly (e.g. if more clips get
@@ -1289,7 +1294,7 @@ export async function processNextInspectionVideo(inspectionId: string): Promise<
       const mb = Math.round(Number(next.size_bytes) / 1024 / 1024)
       await sql`
         update inspection_videos
-        set status = 'failed', error_message = ${`This video is too large (${mb}MB) to process -- the server can safely handle up to ~400MB. Please re-shoot or split it into shorter clips.`}
+        set status = 'failed', error_message = ${`This video is ${SIZE_REJECTION_MARKER} (${mb}MB) to process -- the server can safely handle up to ~480MB. Please re-shoot, split it into shorter clips, or ask an admin to run the split script.`}
         where id = ${next.id}
       `
     } else {

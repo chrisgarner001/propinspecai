@@ -33,9 +33,9 @@
 ### Automatic in-app video chunking
 
 **What:** Split one long video into segments processed across multiple requests,
-removing the ~400MB pre-flight size ceiling entirely.
+removing the ~480MB pre-flight size ceiling entirely.
 
-**Why:** Today, a video over ~400MB must be re-shot or manually split by the inspector
+**Why:** Today, a video over ~480MB must be re-shot or manually split by the inspector
 before upload; this would remove that constraint in-app.
 
 **Context:** Deferred during the 2026-09-24 large-video plan-eng-review because the
@@ -52,6 +52,15 @@ the full disk-constraint reasoning). Revisit this TODO's "not speculative work" 
 if that manual script sees real repeated use — that would be evidence the automatic,
 in-app version is worth the engineering cost after all.
 
+**Update (2026-09-28, threshold plan-eng-review):** Real production data checked
+directly: of 22 videos processed to date, only ONE ever exceeded the old 400MB
+threshold (the 2.09GB file that prompted the 2026-09-24 split-video work). Raised the
+ceiling to ~480MB (evidence-backed by a historical 414MB video that succeeded before
+this check existed) and added a "Copy split command" button to
+`VideoProcessingPanel.tsx` so running the existing manual script no longer requires a
+direct DB lookup for the row id. This TODO's "recurring pain" trigger has now fired
+once, not established as recurring — still deferred.
+
 **Effort:** L
 **Priority:** P4
 **Depends on:** None
@@ -62,7 +71,7 @@ in-app version is worth the engineering cost after all.
 local `/tmp`, to raise the safe video-size ceiling closer to Gemini's real 2GB
 Files API cap.
 
-**Why:** The ~400MB threshold is set by Vercel's real, measured ~512MB `/tmp` capacity
+**Why:** The ~480MB threshold is set by Vercel's real, measured ~512MB `/tmp` capacity
 (confirmed live 2026-09-24 via a temporary diagnostic route against production —
 `statfs` reported ~513MB available, writes failed with `ENOSPC` past 512MB), not by
 Gemini's own 2GB per-file limit. Removing the `/tmp` dependency could support roughly
