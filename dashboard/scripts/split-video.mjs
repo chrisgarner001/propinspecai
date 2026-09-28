@@ -38,10 +38,14 @@ export function parseFolderIdFromUrl(url) {
 }
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-// ~5min segments via ffmpeg's own segment muxer -- fixed time-based split,
-// not silence-aware (plan-eng-review D3). Revisit only if real split output
-// shows a real line-item-quality problem at seams.
-const SEGMENT_SECONDS = 300
+// ~3min segments via ffmpeg's own segment muxer -- fixed time-based split,
+// not silence-aware (plan-eng-review D3). Lowered from 5min (2026-09-28):
+// a 5min segment from a higher-bitrate source produced a real 496MB
+// segment -- too close to the measured ~512MB /tmp ceiling to just raise
+// the app's size threshold to match. Smaller segments keep real margin
+// against that wall regardless of source bitrate. Revisit only if real
+// split output shows a real line-item-quality problem at seams.
+const SEGMENT_SECONDS = 180
 
 // The one function with real data-loss consequences if wrong -- it gates
 // deleting the only copy of the original video. Kept pure and exported so it
