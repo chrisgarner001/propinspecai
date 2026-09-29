@@ -1,7 +1,14 @@
 import 'server-only'
 import { Resend } from 'resend'
 
-const FROM_ADDRESS = 'PropInspec <info@propmind.ai>'
+// TEMPORARY (2026-09-29): propmind.ai isn't verified on Resend yet (confirmed
+// via a real 403 send failure), so this uses Resend's shared sandbox sender
+// until Chris verifies the domain at resend.com/domains. resend.dev's sandbox
+// address only delivers to the email on the Resend account itself -- it will
+// NOT reach a real new user's inbox, so createUser is still effectively
+// broken for anyone but that one account until propmind.ai is verified and
+// this reverts to 'PropInspec <info@propmind.ai>'.
+const FROM_ADDRESS = 'PropInspec <onboarding@resend.dev>'
 
 function getResend(): Resend {
   const apiKey = process.env.RESEND_API_KEY
