@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { login } from '@/app/login/actions'
+import PasswordInput from '@/app/components/PasswordInput'
 
 const fieldClass = 'border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 w-full bg-surface'
 
@@ -35,16 +36,7 @@ export default function LoginForm() {
           className={fieldClass}
         />
       </div>
-      <div>
-        <label className="block text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1">Password</label>
-        <input
-          type="password"
-          required
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className={fieldClass}
-        />
-      </div>
+      <PasswordInput label="Password" value={password} onChange={setPassword} />
       {error && <div className="text-[12px] text-error">{error}</div>}
       <button
         type="submit"

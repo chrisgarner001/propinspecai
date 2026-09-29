@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi, afterEach } from 'vitest'
 import { getSql } from '@/lib/db'
 import { access, writeFile } from 'node:fs/promises'
-import { duplicateLineItem, updateLineItemSchedule, syncInspectionVideos, processNextInspectionVideo, retryInspectionVideo } from './actions'
+import { duplicateLineItem, updateLineItemSchedule, syncInspectionVideos, processNextInspectionVideo, retryInspectionVideo, createUser } from './actions'
 
 // revalidatePath relies on Next's request-scoped static-generation store,
 // which doesn't exist when actions are called directly from a test runner
@@ -34,6 +34,14 @@ vi.mock('@/lib/dal', () => {
 vi.mock('@/lib/embeddings', () => ({
   embedText: vi.fn(async () => null),
   toVectorLiteral: vi.fn((v) => `[${v.join(',')}]`),
+}))
+
+// lib/mail.ts also imports 'server-only' (same reason as @/lib/dal and
+// @/lib/embeddings above) and would otherwise send a real email via Resend.
+// createUser's own tests control this mock's resolved/rejected value directly.
+const mockSendTempPasswordEmail = vi.fn(async (_email: string, _tempPassword: string) => {})
+vi.mock('@/lib/mail', () => ({
+  sendTempPasswordEmail: (...args: [string, string]) => mockSendTempPasswordEmail(...args),
 }))
 
 // Drive/Gemini calls are mocked -- these tests verify the DB state machine
@@ -470,5 +478,68 @@ describe('duplicateLineItem schedule reset', () => {
     expect(dup.scheduled_start).toBeNull()
     expect(dup.scheduled_end).toBeNull()
     expect(dup.blocks_line_item_id).toBeNull()
+  })
+})
+
+describe('createUser', () => {
+  afterEach(async () => {
+    mockSendTempPasswordEmail.mockReset()
+    mockSendTempPasswordEmail.mockImplementation(async () => {})
+    await sql`delete from users where email like 'vitest-createuser-%'`
+  })
+
+  it('sends the temp password email and creates the account with must_change_password set', async () => {
+    const email = 'vitest-createuser-1@example.com'
+    const result = await createUser(email, 'General User')
+
+    expect(result.error).toBeUndefined()
+    expect(mockSendTempPasswordEmail).toHaveBeenCalledTimes(1)
+    expect(mockSendTempPasswordEmail).toHaveBeenCalledWith(email, expect.any(String))
+
+    const [row] = await sql`select role, must_change_password, password_hash from users where email = ${email}`
+    expect(row).toBeDefined()
+    expect(row.role).toBe('General User')
+    expect(row.must_change_password).toBe(true)
+    // The stored hash must not just be the plaintext email/role -- confirms
+    // a real bcrypt hash of the generated temp password was stored, not the
+    // email itself or some placeholder.
+    expect(row.password_hash).toMatch(/^\$2[aby]\$/)
+  })
+
+  it('does not create an account when the email fails to send (D2: fail-hard, no orphaned account)', async () => {
+    const email = 'vitest-createuser-2@example.com'
+    mockSendTempPasswordEmail.mockImplementation(async () => {
+      throw new Error('Resend outage')
+    })
+
+    const result = await createUser(email, 'General User')
+
+    expect(result.error).toMatch(/could not send/i)
+    const [row] = await sql`select id from users where email = ${email}`
+    expect(row).toBeUndefined()
+  })
+
+  it('rejects an invalid email before ever sending an email', async () => {
+    const result = await createUser('not-an-email', 'General User')
+    expect(result.error).toMatch(/valid email/i)
+    expect(mockSendTempPasswordEmail).not.toHaveBeenCalled()
+  })
+
+  it('rejects an invalid access level before ever sending an email', async () => {
+    const result = await createUser('vitest-createuser-3@example.com', 'Superadmin')
+    expect(result.error).toMatch(/invalid access level/i)
+    expect(mockSendTempPasswordEmail).not.toHaveBeenCalled()
+  })
+
+  it('returns a clear error for a duplicate email and does not resend/duplicate the row', async () => {
+    const email = 'vitest-createuser-4@example.com'
+    const first = await createUser(email, 'General User')
+    expect(first.error).toBeUndefined()
+
+    const second = await createUser(email, 'General User')
+    expect(second.error).toMatch(/already exists/i)
+
+    const rows = await sql`select id from users where email = ${email}`
+    expect(rows).toHaveLength(1)
   })
 })

@@ -12,9 +12,10 @@ import { getPageContext } from '@/lib/helpContext'
 import { writeFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, randomBytes } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import { requireSessionOrThrow, requireAdminOrThrow } from '@/lib/dal'
+import { sendTempPasswordEmail } from '@/lib/mail'
 import { embedText, toVectorLiteral } from '@/lib/embeddings'
 
 function toNumberOrNull(value: FormDataEntryValue | null): number | null {
@@ -1477,30 +1478,34 @@ export async function askHelp(
 // (useTransition), not a plain form action, so a duplicate-email/
 // short-password rejection can be shown inline instead of silently no-oping
 // the way createVendor/createStage do.
-export async function createUser(
-  email: string,
-  password: string,
-  role: string
-): Promise<{ error?: string }> {
+export async function createUser(email: string, role: string): Promise<{ error?: string }> {
   await requireAdminOrThrow()
   const sql = getSql()
   const normalizedEmail = email.trim().toLowerCase()
   if (!normalizedEmail || !normalizedEmail.includes('@')) {
     return { error: 'Enter a valid email address.' }
   }
-  if (password.length < 8) {
-    return { error: 'Password must be at least 8 characters.' }
-  }
   if (role !== 'Admin' && role !== 'General User') {
     return { error: 'Invalid access level.' }
   }
 
-  const passwordHash = await bcrypt.hash(password, 12)
+  // Random temp password, never chosen by the admin -- the new user only
+  // ever learns it via the email below. Sent BEFORE the insert (plan-eng-review,
+  // 2026-09-29, D2): if the email fails, nothing is created, rather than a
+  // real account existing that its owner can never learn the password to.
+  const tempPassword = randomBytes(12).toString('base64url')
+  try {
+    await sendTempPasswordEmail(normalizedEmail, tempPassword)
+  } catch {
+    return { error: 'Could not send the account email. No account was created -- try again.' }
+  }
+
+  const passwordHash = await bcrypt.hash(tempPassword, 12)
 
   try {
     await sql`
-      insert into users (email, password_hash, role)
-      values (${normalizedEmail}, ${passwordHash}, ${role})
+      insert into users (email, password_hash, role, must_change_password)
+      values (${normalizedEmail}, ${passwordHash}, ${role}, true)
     `
   } catch (err) {
     const pgError = err as { code?: string }

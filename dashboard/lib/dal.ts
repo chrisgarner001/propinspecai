@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation'
 import { getSql } from './db'
 import { decrypt, SESSION_COOKIE_NAME, type SessionPayload } from './session'
 
-export type Session = { userId: string; email: string; role: string }
+export type Session = { userId: string; email: string; role: string; mustChangePassword: boolean }
 
 // The real security boundary (see docs/designs/propinspec-authentication.md,
 // Approach A) -- app/proxy.ts only does an optimistic, cookie-only redirect;
@@ -29,9 +29,9 @@ export const verifySession = cache(async (): Promise<Session | null> => {
 
   try {
     const sql = getSql()
-    const [user] = await sql`select id, email, role from users where id = ${payload.userId}`
+    const [user] = await sql`select id, email, role, must_change_password from users where id = ${payload.userId}`
     if (!user) return null
-    return { userId: user.id, email: user.email, role: user.role }
+    return { userId: user.id, email: user.email, role: user.role, mustChangePassword: user.must_change_password }
   } catch (err) {
     console.error('verifySession: database check failed, treating as unauthenticated', err)
     return null
@@ -40,9 +40,12 @@ export const verifySession = cache(async (): Promise<Session | null> => {
 
 // For Server Components (pages) -- redirects to /login instead of returning
 // null, since a page has no other way to reject an unauthenticated render.
-export async function requireSession(): Promise<Session> {
+// skipPasswordCheck is set only by /change-password itself, to avoid
+// redirecting that page to itself.
+export async function requireSession(opts?: { skipPasswordCheck?: boolean }): Promise<Session> {
   const session = await verifySession()
   if (!session) redirect('/login')
+  if (session.mustChangePassword && !opts?.skipPasswordCheck) redirect('/change-password')
   return session
 }
 
@@ -63,9 +66,16 @@ export async function requireAdmin(): Promise<Session> {
 // already authenticated by the page's own requireSession()/requireAdmin()
 // -- this only fires for a direct/replayed call bypassing the UI, not
 // normal usage.
+// changePassword's own action calls verifySession() directly, not this --
+// a must-change-password user needs to reach that one action to escape the
+// state. Every other Server Action/Route Handler goes through here and gets
+// rejected instead, so a must-change-password session can't be used to
+// mutate data by replaying/calling an action directly, bypassing the page
+// redirect above (plan-eng-review, 2026-09-29, D4).
 export async function requireSessionOrThrow(): Promise<Session> {
   const session = await verifySession()
   if (!session) throw new Error('Not authenticated')
+  if (session.mustChangePassword) throw new Error('Password change required')
   return session
 }
 

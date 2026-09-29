@@ -5,13 +5,12 @@ import { createUser } from '@/app/actions'
 
 const fieldClass = 'border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 w-full bg-surface'
 
-// Plain <form action={fn}> can't show a duplicate-email/weak-password
+// Plain <form action={fn}> can't show a duplicate-email/send-failure
 // rejection inline (the page would just re-render with the same empty
 // state) -- so this calls createUser directly via useTransition, matching
 // the pattern HelpWidget.tsx already uses for the same reason.
 export default function CreateUserForm() {
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
   const [role, setRole] = useState('General User')
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
@@ -20,13 +19,12 @@ export default function CreateUserForm() {
     e.preventDefault()
     setError(null)
     startTransition(async () => {
-      const result = await createUser(email, password, role)
+      const result = await createUser(email, role)
       if (result.error) {
         setError(result.error)
         return
       }
       setEmail('')
-      setPassword('')
       setRole('General User')
     })
   }
@@ -40,17 +38,6 @@ export default function CreateUserForm() {
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className={fieldClass}
-        />
-      </div>
-      <div className="flex-1 min-w-[140px]">
-        <label className="block text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1">Password</label>
-        <input
-          type="password"
-          required
-          minLength={8}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
           className={fieldClass}
         />
       </div>
