@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi, afterEach } from 'vitest'
 import { getSql } from '@/lib/db'
 import { access, writeFile } from 'node:fs/promises'
+import { Readable } from 'node:stream'
 import { duplicateLineItem, updateLineItemSchedule, syncInspectionVideos, processNextInspectionVideo, retryInspectionVideo, createUser } from './actions'
 
 // revalidatePath relies on Next's request-scoped static-generation store,
@@ -65,10 +66,25 @@ vi.mock('@/lib/google', async (importOriginal) => {
     ...actual,
     downloadDriveFileToPath: (...args: [string, string]) => mockDownloadDriveFileToPath(...args),
     listVideosInFolder: (...args: unknown[]) => mockListVideosInFolder(...args),
+    ensureSubfolder: (...args: unknown[]) => mockEnsureSubfolder(...args),
+    uploadVideoToFolder: (...args: unknown[]) => mockUploadVideoToFolder(...args),
+    trashDriveFile: (...args: unknown[]) => mockTrashDriveFile(...args),
   }
 })
+// Room clips (9355 Sylvia audit): Drive writes are mocked like the reads
+// above. The upload mock returns a fake Drive id derived from the clip's
+// name so a test can assert which rooms got a clip.
+const mockEnsureSubfolder = vi.fn(async (..._args: unknown[]) => 'room-clips-folder')
+const mockUploadVideoToFolder = vi.fn(async (...args: unknown[]) => `drive-${args[1]}`)
+const mockTrashDriveFile = vi.fn(async (..._args: unknown[]) => {})
+// Most tests only care about line items, so a mock resolving to a bare array
+// is wrapped into the full extraction shape; tests covering measurements and
+// room segments resolve to the full object directly.
 vi.mock('@/lib/gemini', () => ({
-  extractLineItemsFromVideo: (...args: unknown[]) => mockExtractLineItemsFromVideo(...args),
+  extractInspectionFromVideo: async (...args: unknown[]) => {
+    const r = await mockExtractLineItemsFromVideo(...args)
+    return Array.isArray(r) ? { line_items: r, room_measurements: [], room_segments: [] } : r
+  },
 }))
 
 // Still extraction shells out to a real ffmpeg binary against the video on
@@ -80,7 +96,12 @@ vi.mock('@/lib/stills', () => ({
   extractFrame: vi.fn(),
   uploadStill: vi.fn(),
   getVideoCreationTime: vi.fn(async () => null),
+  cutClip: vi.fn(async (_videoPath: string, start: number) => `/nonexistent/clip-${start}.mp4`),
+  cutClipToStream: (...args: unknown[]) => mockCutClipToStream(...args),
+  hasTmpSpaceFor: (...args: unknown[]) => mockHasTmpSpaceFor(...args),
 }))
+const mockHasTmpSpaceFor = vi.fn(async (..._args: unknown[]) => true)
+const mockCutClipToStream = vi.fn((..._args: unknown[]) => ({ stream: Readable.from([]), done: Promise.resolve() }))
 
 // Integration tests against the real dev Postgres (DATABASE_URL from
 // .env.local, loaded by vitest.setup.ts) -- matches this project's existing
@@ -450,6 +471,169 @@ describe('video processing pipeline', () => {
 
     const reprocessed = await processNextInspectionVideo(inspectionId)
     expect(reprocessed.videos.find((v) => v.id === stuck.id)?.status).toBe('done')
+  })
+
+  // 9355 Sylvia audit (2026-09-30): measurements and per-room clips.
+  describe('room measurements and clips', () => {
+    let roomsInspectionId: string
+
+    beforeAll(async () => {
+      const [row] = await sql`
+        insert into inspections (job_number, property_address, inspection_date, inspector_name, source_video_drive_folder_url)
+        values ('VITEST', 'Vitest Rooms Test', '2026-01-01', 'Vitest', 'https://drive.google.com/drive/folders/rooms123')
+        returning id
+      `
+      roomsInspectionId = row.id as string
+    })
+
+    afterAll(async () => {
+      await sql`delete from inspections where id = ${roomsInspectionId}`
+    })
+
+    afterEach(async () => {
+      mockEnsureSubfolder.mockClear()
+      mockUploadVideoToFolder.mockClear()
+      mockTrashDriveFile.mockClear()
+      mockCutClipToStream.mockClear()
+      mockHasTmpSpaceFor.mockResolvedValue(true)
+      await sql`delete from inspection_videos where inspection_id = ${roomsInspectionId}`
+      await sql`delete from line_items where inspection_id = ${roomsInspectionId}`
+    })
+
+    const lineItem = (room_area: string, source_timestamp: string) => ({
+      room_area,
+      item: 'Walls',
+      condition: 'Fair',
+      observed_evidence: 'Patched drywall',
+      recommended_action: 'Paint',
+      trade_category: 'painting/drywall',
+      assigned_to: 'Outside Vendor',
+      priority: 'Routine turnover',
+      source_timestamp,
+    })
+
+    it('stores measurements, one clip per room span uploaded to the Room Clips folder, and a retry replaces them', async () => {
+      const [video] = await sql`
+        insert into inspection_videos (inspection_id, drive_file_id, filename, size_bytes)
+        values (${roomsInspectionId}, 'file-kitchen-attic', '20260727_162556.mp4', 100000000)
+        returning id
+      `
+      mockExtractLineItemsFromVideo.mockResolvedValue({
+        line_items: [lineItem('Kitchen', '0:07'), lineItem('Attic', '2:52')],
+        room_measurements: [
+          { room_area: 'Kitchen', what_measured: 'Room', measurement: '9 x 13', source: 'Narrated', source_timestamp: '0:07' },
+        ],
+        room_segments: [
+          { room_area: 'Kitchen', start_timestamp: '0:00', end_timestamp: '0:30' },
+          { room_area: 'Attic', start_timestamp: '2:49', end_timestamp: '4:10' },
+        ],
+      })
+
+      await processNextInspectionVideo(roomsInspectionId)
+
+      const [m] = await sql`select * from room_measurements where inspection_video_id = ${video.id}`
+      expect(m.room_area).toBe('Kitchen')
+      expect(m.measurement).toBe('9 x 13')
+
+      const clips = await sql`select * from room_clips where inspection_video_id = ${video.id} order by start_seconds`
+      expect(clips.map((c) => [c.room_area, Number(c.start_seconds), Number(c.end_seconds)])).toEqual([
+        ['Kitchen', 0, 30],
+        ['Attic', 169, 250],
+      ])
+      expect(mockEnsureSubfolder).toHaveBeenCalledWith('rooms123', 'Room Clips')
+      expect(clips.every((c) => typeof c.drive_file_id === 'string' && c.drive_file_id.startsWith('drive-'))).toBe(true)
+      expect(clips[1].filename).toBe('20260727_162556 - Attic (2.49-4.10).mp4')
+
+      // Retry: the previous run's clips are trashed in Drive and replaced,
+      // not duplicated; measurements likewise.
+      await sql`update inspection_videos set status = 'pending' where id = ${video.id}`
+      await processNextInspectionVideo(roomsInspectionId)
+      expect(mockTrashDriveFile).toHaveBeenCalledTimes(2)
+      const [{ count: clipCount }] = await sql`select count(*) from room_clips where inspection_video_id = ${video.id}`
+      const [{ count: measurementCount }] = await sql`select count(*) from room_measurements where inspection_video_id = ${video.id}`
+      expect(Number(clipCount)).toBe(2)
+      expect(Number(measurementCount)).toBe(1)
+    })
+
+    it('streams a clip straight to Drive when it will not fit in /tmp, and trashes a truncated upload if ffmpeg fails', async () => {
+      await sql`
+        insert into inspection_videos (inspection_id, drive_file_id, filename, size_bytes)
+        values (${roomsInspectionId}, 'file-big-segment', 'big-segment.mp4', 446747015)
+      `
+      mockHasTmpSpaceFor.mockResolvedValue(false)
+      mockCutClipToStream
+        .mockReturnValueOnce({ stream: Readable.from([]), done: Promise.resolve() })
+        .mockReturnValueOnce({ stream: Readable.from([]), done: Promise.reject(new Error('ffmpeg exited 1')) })
+      mockExtractLineItemsFromVideo.mockResolvedValue({
+        line_items: [lineItem('Utility Room', '0:30')],
+        room_measurements: [],
+        room_segments: [
+          { room_area: 'Utility Room', start_timestamp: '0:26', end_timestamp: '2:47' },
+          { room_area: 'Attic', start_timestamp: '2:47', end_timestamp: '4:18' },
+        ],
+      })
+
+      const result = await processNextInspectionVideo(roomsInspectionId)
+      expect(result.videos[0].status).toBe('done')
+      expect(mockCutClipToStream).toHaveBeenCalledTimes(2)
+
+      const clips = await sql`select room_area, drive_file_id from room_clips where inspection_id = ${roomsInspectionId} order by start_seconds`
+      expect(clips[0].drive_file_id).toBe('drive-big-segment - Utility Room (0.26-2.47).mp4')
+      // The failed cut's partial upload is trashed and the span kept without a clip.
+      expect(clips[1].drive_file_id).toBeNull()
+      expect(mockTrashDriveFile).toHaveBeenCalledWith('drive-big-segment - Attic (2.47-4.18).mp4')
+    })
+
+    it('processes segments in recording order and carries a room across a split seam', async () => {
+      // Synced part2-first, exactly like 9355 Sylvia -- created_at order
+      // would have processed the second half of the walkthrough first.
+      await sql`
+        insert into inspection_videos (inspection_id, drive_file_id, filename, size_bytes)
+        values (${roomsInspectionId}, 'file-part2', '20260727_160735-part1-part2.mp4', 100000000)
+      `
+      await sql`
+        insert into inspection_videos (inspection_id, drive_file_id, filename, size_bytes)
+        values (${roomsInspectionId}, 'file-part1', '20260727_160735-part1-part1.mp4', 100000000)
+      `
+      mockExtractLineItemsFromVideo
+        .mockResolvedValueOnce({
+          line_items: [lineItem('Bedroom 2', '0:08'), lineItem('Bedroom 3', '2:32')],
+          room_measurements: [],
+          room_segments: [
+            { room_area: 'Bedroom 2', start_timestamp: '0:00', end_timestamp: '2:28' },
+            { room_area: 'Bedroom 3', start_timestamp: '2:29', end_timestamp: '3:00' },
+          ],
+        })
+        .mockResolvedValueOnce({
+          line_items: [lineItem('Bedroom', '0:10'), lineItem('Bathroom', '1:48')],
+          room_measurements: [
+            { room_area: 'Bedroom', what_measured: 'Closet', measurement: '2 x 9', source: 'Narrated', source_timestamp: '0:10' },
+          ],
+          room_segments: [
+            { room_area: 'Bedroom', start_timestamp: '0:00', end_timestamp: '1:45' },
+            { room_area: 'Bathroom', start_timestamp: '1:46', end_timestamp: '3:00' },
+          ],
+        })
+
+      await processNextInspectionVideo(roomsInspectionId)
+      await processNextInspectionVideo(roomsInspectionId)
+
+      const firstCallFile = await sql`select source_video_file from line_items where inspection_id = ${roomsInspectionId} and room_area = 'Bedroom 2'`
+      expect(firstCallFile[0].source_video_file).toBe('20260727_160735-part1-part1.mp4')
+
+      // The second segment's prompt was told where the first one ended...
+      const secondCallContext = mockExtractLineItemsFromVideo.mock.calls[1][1]
+      expect(secondCallContext).toEqual({ roomsSoFar: ['Bedroom 2', 'Bedroom 3'], previousLastRoom: 'Bedroom 3' })
+
+      // ...and the generic "Bedroom" it came back with anyway is corrected
+      // everywhere, while a genuinely new room (Bathroom) is left alone.
+      const part2Rooms = await sql`
+        select room_area from line_items where inspection_id = ${roomsInspectionId} and source_video_file = '20260727_160735-part1-part2.mp4' order by source_timestamp
+      `
+      expect(part2Rooms.map((r) => r.room_area)).toEqual(['Bedroom 3', 'Bathroom'])
+      const [closet] = await sql`select room_area from room_measurements where inspection_id = ${roomsInspectionId} and what_measured = 'Closet'`
+      expect(closet.room_area).toBe('Bedroom 3')
+    })
   })
 })
 

@@ -1,7 +1,8 @@
 import { google } from 'googleapis'
-import { createWriteStream } from 'node:fs'
+import { createReadStream, createWriteStream } from 'node:fs'
 import { unlink } from 'node:fs/promises'
 import { pipeline } from 'node:stream/promises'
+import type { Readable } from 'node:stream'
 
 // Service account credentials come from an env var (GOOGLE_SERVICE_ACCOUNT_JSON),
 // same pattern as DATABASE_URL -- works identically in local dev and on Vercel.
@@ -87,4 +88,59 @@ export async function downloadDriveFileToPath(fileId: string, destPath: string):
     await unlink(destPath).catch(() => {})
     throw err
   }
+}
+
+// Room clips (9355 Sylvia audit, 2026-09-30) go in a "Room Clips" subfolder
+// of the inspection's own video folder, not the folder itself --
+// listVideosInFolder only lists that folder's direct children, so clips in a
+// subfolder are never picked up by "Check for new videos" as new source
+// videos to process. Same Shared Drive, so the same viewer permissions
+// VideoPopupLink already relies on apply to the clips too. Needs write
+// access (the service account's 'fileOrganizer' role on GPM's Shared Drive,
+// same as scripts/split-video.mjs) -- callers treat a failure here as
+// best-effort, not fatal to processing.
+export const ROOM_CLIPS_FOLDER_NAME = 'Room Clips'
+
+export async function ensureSubfolder(parentFolderId: string, name: string): Promise<string> {
+  const drive = google.drive({ version: 'v3', auth: getGoogleAuth() })
+  const escaped = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+  const existing = await drive.files.list({
+    q: `'${parentFolderId}' in parents and name = '${escaped}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+    fields: 'files(id)',
+  })
+  const found = existing.data.files?.[0]?.id
+  if (found) return found
+
+  const created = await drive.files.create({
+    requestBody: { name, mimeType: 'application/vnd.google-apps.folder', parents: [parentFolderId] },
+    supportsAllDrives: true,
+    fields: 'id',
+  })
+  if (!created.data.id) throw new Error(`Drive did not return an id for the new "${name}" folder.`)
+  return created.data.id
+}
+
+// Takes a local path or an already-open stream (a clip piped straight out of
+// ffmpeg -- see lib/stills.ts's cutClipToStream).
+export async function uploadVideoToFolder(source: string | Readable, name: string, folderId: string): Promise<string> {
+  const drive = google.drive({ version: 'v3', auth: getGoogleAuth() })
+  const res = await drive.files.create({
+    requestBody: { name, parents: [folderId] },
+    media: { mimeType: 'video/mp4', body: typeof source === 'string' ? createReadStream(source) : source },
+    supportsAllDrives: true,
+    fields: 'id',
+  })
+  if (!res.data.id) throw new Error(`Drive did not return an id for uploaded clip ${name}.`)
+  return res.data.id
+}
+
+// Best-effort cleanup when a video is reprocessed, so a retry doesn't leave
+// the previous run's clips behind as orphans. Trash, not delete -- the
+// service account's 'fileOrganizer' role can trash but not permanently
+// delete (same constraint as scripts/split-video.mjs).
+export async function trashDriveFile(fileId: string): Promise<void> {
+  const drive = google.drive({ version: 'v3', auth: getGoogleAuth() })
+  await drive.files.update({ fileId, requestBody: { trashed: true }, supportsAllDrives: true })
 }

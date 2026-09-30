@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
-import { readFile, unlink } from 'node:fs/promises'
+import { readFile, unlink, statfs } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -18,27 +18,9 @@ function getSupabaseAdmin() {
   return createClient(url, key)
 }
 
-// Gemini's source_timestamp is normally a single point ("0:42"), but the
-// original hand-test format ("Clip 2, 0:20-0:29") is also accepted so this
-// stays compatible with any line item however it was produced. Returns null
-// for "Unable to determine" or anything else unparsable -- callers skip the
-// still for that line item rather than fail it over a missing timestamp.
-export function parseTimestampSeconds(raw: string): number | null {
-  const cleaned = raw.replace(/^Clip\s*\d+,\s*/i, '').trim()
-  const [startStr, endStr] = cleaned.split('-').map((s) => s.trim())
-
-  const toSeconds = (t: string): number | null => {
-    const segs = t.split(':').map(Number)
-    if (segs.length < 2 || segs.length > 3 || segs.some((n) => Number.isNaN(n))) return null
-    return segs.length === 3 ? segs[0] * 3600 + segs[1] * 60 + segs[2] : segs[0] * 60 + segs[1]
-  }
-
-  const start = toSeconds(startStr)
-  if (start === null) return null
-  if (!endStr) return start
-  const end = toSeconds(endStr)
-  return end === null ? start : (start + end) / 2
-}
+// Moved to lib/timestamps.ts (no ffmpeg/Supabase imports) so lib/rooms.ts
+// can share it; re-exported here so existing importers are unchanged.
+export { parseTimestampSeconds } from './timestamps'
 
 // Reads the video's own creation_time from its container metadata (the real
 // wall-clock moment recording started) via ffmpeg's own metadata dump --
@@ -91,4 +73,79 @@ export async function uploadStill(frame: Buffer, storageKey: string): Promise<st
 
   const { data } = supabase.storage.from(STILLS_BUCKET).getPublicUrl(storageKey)
   return data.publicUrl
+}
+
+// Cuts one room's span out of an already-downloaded video into its own MP4
+// (9355 Sylvia audit, 2026-09-30). `-c copy` -- no re-encode, so it takes
+// seconds, not minutes, and adds no quality loss; the trade-off is the cut
+// snaps to the nearest keyframe, so a clip can start up to a couple of
+// seconds early, which is fine for "show me this room". `+faststart` moves
+// the moov atom to the front so Drive's preview player can start playback
+// before the whole clip has loaded. Returns the temp path; the caller
+// uploads it and MUST unlink it (disk is the governing constraint -- see
+// hasTmpSpaceFor below).
+export async function cutClip(videoPath: string, startSeconds: number, endSeconds: number): Promise<string> {
+  if (!ffmpegPath) throw new Error('ffmpeg-static did not resolve a binary path')
+  const outPath = join(tmpdir(), `propinspec-clip-${randomUUID()}.mp4`)
+  try {
+    await execFileAsync(ffmpegPath, [
+      '-y',
+      '-ss', String(startSeconds),
+      '-i', videoPath,
+      '-t', String(Math.max(1, endSeconds - startSeconds)),
+      '-c', 'copy',
+      '-avoid_negative_ts', 'make_zero',
+      '-movflags', '+faststart',
+      outPath,
+    ])
+    return outPath
+  } catch (err) {
+    await unlink(outPath).catch(() => {})
+    throw err
+  }
+}
+
+// Same cut as cutClip, but written to ffmpeg's stdout instead of /tmp, for a
+// clip that won't fit on disk next to its source (see hasTmpSpaceFor). A
+// pipe can't be seeked back into to write a moov atom, so this emits
+// fragmented MP4 (`frag_keyframe+empty_moov`) -- only the OUTPUT is a pipe;
+// the input is still the seekable file on disk, so the phone-video
+// moov-at-the-end problem split-video.mjs avoids doesn't apply. `done`
+// rejects if ffmpeg exits non-zero, so the caller can discard a truncated
+// upload instead of keeping it.
+export function cutClipToStream(videoPath: string, startSeconds: number, endSeconds: number) {
+  if (!ffmpegPath) throw new Error('ffmpeg-static did not resolve a binary path')
+  const child = spawn(ffmpegPath, [
+    '-ss', String(startSeconds),
+    '-i', videoPath,
+    '-t', String(Math.max(1, endSeconds - startSeconds)),
+    '-c', 'copy',
+    '-avoid_negative_ts', 'make_zero',
+    '-movflags', 'frag_keyframe+empty_moov',
+    '-f', 'mp4',
+    'pipe:1',
+  ], { stdio: ['ignore', 'pipe', 'pipe'] })
+  let stderr = ''
+  child.stderr.on('data', (d) => { stderr = (stderr + d).slice(-2000) })
+  const done = new Promise<void>((resolve, reject) => {
+    child.on('error', reject)
+    child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}: ${stderr.trim().split('\n').pop()}`))))
+  })
+  return { stream: child.stdout, done }
+}
+
+// Vercel's /tmp is ~512MB (measured, see TODOS.md) and the source video
+// itself can be up to ~480MB, so a room clip often can't be written next to
+// it (measured on 9355 Sylvia: a 447MB segment's 2:22 utility-room clip is
+// 246MB). Checked per clip against a size estimate proportional to the
+// clip's share of the source's duration, plus 20% headroom; a clip that
+// won't fit goes through cutClipToStream instead of risking a mid-write
+// ENOSPC.
+export async function hasTmpSpaceFor(estimatedBytes: number): Promise<boolean> {
+  try {
+    const stats = await statfs(tmpdir())
+    return stats.bavail * stats.bsize > estimatedBytes * 1.2
+  } catch {
+    return false
+  }
 }

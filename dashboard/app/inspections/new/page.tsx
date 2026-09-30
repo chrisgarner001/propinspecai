@@ -4,6 +4,7 @@ import { requireSession } from '@/lib/dal'
 import AppShell from '@/app/components/AppShell'
 import SpecialInstructionsField from '@/app/components/SpecialInstructionsField'
 import InspectorField from '@/app/components/InspectorField'
+import WorkOrderLookupFields from '@/app/components/WorkOrderLookupFields'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,10 +25,9 @@ export default async function NewInspectionPage() {
     select id, name from inspection_types order by (name = 'Move-Out') desc, name
   `) as unknown as NamedRow[]
   const inspectors = (await sql`select id, name from inspectors order by name`) as unknown as NamedRow[]
-  // Autofill source for the address field below -- the Properties list is
-  // manual entry for now (no real PropertyWare API access/docs exist yet,
-  // see docs/designs/propinspec-inspection-type-gallery.md's sibling
-  // Properties work), but every address already in it is worth suggesting.
+  // Autofill source for the address field below, alongside the Propertyware
+  // work order lookup (lib/propertyware.ts) -- still worth suggesting for an
+  // address the lookup can't resolve.
   const properties = (await sql`select address from properties order by address`) as unknown as { address: string }[]
 
   return (
@@ -43,20 +43,12 @@ export default async function NewInspectionPage() {
             ))}
           </select>
         </div>
-        <div>
-          <label className={labelClass}>Property address</label>
-          <input list="property-addresses" name="property_address" required className={inputClass} />
-          <datalist id="property-addresses">
-            {properties.map((p) => (
-              <option key={p.address} value={p.address} />
-            ))}
-          </datalist>
-          <div className={helpClass}>Start typing the address for autofill from Properties.</div>
-        </div>
-        <div>
-          <label className={labelClass}>Work order number</label>
-          <input name="job_number" required className="data-mono w-full border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 bg-surface" />
-        </div>
+        <WorkOrderLookupFields
+          propertyAddresses={properties.map((p) => p.address)}
+          inputClass={inputClass}
+          labelClass={labelClass}
+          helpClass={helpClass}
+        />
         <div>
           <label className={labelClass}>Inspector</label>
           <InspectorField inspectors={inspectors} className={inputClass} />

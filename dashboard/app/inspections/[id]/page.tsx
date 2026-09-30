@@ -14,6 +14,7 @@ import VideoProcessingPanel from '@/app/components/VideoProcessingPanel'
 import CreateBatchesButton from '@/app/components/CreateBatchesButton'
 import InspectionQuickView from '@/app/components/InspectionQuickView'
 import type { InspectionVideoRow } from '@/app/actions'
+import { compareVideoFilenames, findClipForLineItem, formatSeconds } from '@/lib/rooms'
 
 // Raised from the platform default for processNextInspectionVideo (called
 // from this page via VideoProcessingPanel) -- downloading a multi-minute
@@ -56,6 +57,19 @@ type LineItem = {
   source_video_drive_file_id: string | null
   still_image_file: string | null
   captured_at: string | null
+  source_timestamp: string | null
+}
+
+type RoomMeasurementRow = { room_area: string; what_measured: string; measurement: string; source: string }
+
+type RoomClipRow = {
+  room_area: string
+  start_seconds: number
+  end_seconds: number
+  drive_file_id: string | null
+  filename: string | null
+  inspection_video_drive_file_id: string
+  source_filename: string
 }
 
 type Vendor = { id: string; name: string }
@@ -96,6 +110,36 @@ export default async function InspectionPage({
     select id, drive_file_id, filename, status, error_message, line_items_created
     from inspection_videos where inspection_id = ${id} order by created_at
   `) as unknown as InspectionVideoRow[]
+
+  // 9355 Sylvia audit (2026-09-30): narrated dimensions and per-room clips,
+  // written by processNextInspectionVideo (app/actions.ts).
+  const roomMeasurements = (await sql`
+    select room_area, what_measured, measurement, source from room_measurements
+    where inspection_id = ${id} order by created_at
+  `) as unknown as RoomMeasurementRow[]
+
+  const roomClips = ((await sql`
+    select rc.room_area, rc.start_seconds::float8 as start_seconds, rc.end_seconds::float8 as end_seconds,
+           rc.drive_file_id, rc.filename, v.drive_file_id as inspection_video_drive_file_id, v.filename as source_filename
+    from room_clips rc join inspection_videos v on v.id = rc.inspection_video_id
+    where rc.inspection_id = ${id}
+  `) as unknown as RoomClipRow[]).sort(
+    (a, b) => compareVideoFilenames(a.source_filename, b.source_filename) || a.start_seconds - b.start_seconds,
+  )
+
+  // Rooms in walkthrough order (first clip appearance), then any room that
+  // only exists as a line item (manual additions, pre-audit inspections).
+  const roomKey = (r: string) => r.trim().toLowerCase()
+  const roomNames = new Map<string, string>()
+  for (const c of roomClips) if (!roomNames.has(roomKey(c.room_area))) roomNames.set(roomKey(c.room_area), c.room_area)
+  for (const a of areas) if (!roomNames.has(roomKey(a))) roomNames.set(roomKey(a), a)
+  for (const m of roomMeasurements) if (!roomNames.has(roomKey(m.room_area))) roomNames.set(roomKey(m.room_area), m.room_area)
+  const rooms = [...roomNames.values()].map((name) => ({
+    name,
+    measurements: roomMeasurements.filter((m) => roomKey(m.room_area) === roomKey(name)),
+    clips: roomClips.filter((c) => roomKey(c.room_area) === roomKey(name)),
+  }))
+  const hasRoomData = roomMeasurements.length > 0 || roomClips.length > 0
 
   const quoteActionsVisible = QUOTE_ACTIONS_VISIBLE_STATUSES.includes(inspection.status)
   // Quote Sheet / Tenant Chargeback Review / everything downstream of them
@@ -279,6 +323,57 @@ export default async function InspectionPage({
         </div>
       )}
 
+      {hasRoomData && (
+        <div className="px-4 md:px-6 py-3 border-b border-border">
+          <h2 className="text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-2">Rooms</h2>
+          <div className="divide-y divide-border border border-border rounded-[var(--radius-md)] bg-surface">
+            {rooms.map((room) => {
+              const roomSize = room.measurements.find((m) => m.what_measured.trim().toLowerCase() === 'room')
+              const otherMeasurements = room.measurements.filter((m) => m !== roomSize)
+              return (
+                <div key={room.name} className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,2fr)] gap-x-4 gap-y-1 px-3 py-2">
+                  <a
+                    href={`#${areaAnchor(room.name)}`}
+                    className="text-[12px] font-bold uppercase text-accent hover:text-accent-hover truncate"
+                  >
+                    {room.name}
+                  </a>
+                  <div className="text-[12px] min-w-0">
+                    {roomSize ? (
+                      <span className="data-mono" title={roomSize.source}>{roomSize.measurement}</span>
+                    ) : (
+                      <span className="text-text-muted">No room dimensions recorded</span>
+                    )}
+                    {otherMeasurements.length > 0 && (
+                      <div className="text-[11px] text-text-muted">
+                        {otherMeasurements.map((m, i) => (
+                          <span key={i} className="mr-3 whitespace-nowrap">
+                            {m.what_measured}: <span className="data-mono">{m.measurement}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 min-w-0">
+                    {room.clips.length === 0 && <span className="text-[11px] text-text-muted">No clip</span>}
+                    {room.clips.map((c, i) => {
+                      const label = `${room.clips.length > 1 ? `Part ${i + 1} · ` : ''}${formatSeconds(c.start_seconds)}–${formatSeconds(c.end_seconds)}`
+                      return c.drive_file_id ? (
+                        <VideoPopupLink key={i} filename={`▶ ${label}`} driveFileId={c.drive_file_id} />
+                      ) : (
+                        <span key={i} className="data-mono text-[11px] text-text-muted whitespace-nowrap" title="Clip not cut -- open the source video at this time">
+                          {c.source_filename} @ {formatSeconds(c.start_seconds)}
+                        </span>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       <form action={bulkUpdateLineItems}>
         <input type="hidden" name="inspection_id" value={id} />
         <div role="table">
@@ -352,9 +447,20 @@ export default async function InspectionPage({
                     )}
                   </div>
                   <EvidenceStill stillImageFile={li.still_image_file} capturedAt={li.captured_at} />
-                  {li.source_video_file && (
-                    <VideoPopupLink filename={li.source_video_file} driveFileId={li.source_video_drive_file_id} />
-                  )}
+                  {li.source_video_file && (() => {
+                    const clip = findClipForLineItem(roomClips, li)
+                    return (
+                      <div className="flex flex-wrap items-center gap-x-3">
+                        {clip?.drive_file_id && (
+                          <VideoPopupLink
+                            filename={`▶ ${clip.room_area} clip ${formatSeconds(clip.start_seconds)}–${formatSeconds(clip.end_seconds)}`}
+                            driveFileId={clip.drive_file_id}
+                          />
+                        )}
+                        <VideoPopupLink filename={li.source_video_file} driveFileId={li.source_video_drive_file_id} />
+                      </div>
+                    )
+                  })()}
                 </div>
               </div>
               <div role="cell" className="min-w-0">

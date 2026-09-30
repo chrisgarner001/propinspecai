@@ -1,4 +1,5 @@
 import { GoogleGenAI, createPartFromUri, createUserContent, Type, type Schema } from '@google/genai'
+import type { RoomMeasurement, RoomSegment } from './rooms'
 
 // Model is configurable via env var, not hardcoded -- Gemini model ids change
 // frequently (2.5 Pro/Flash/Flash-Lite are already scheduled to shut down
@@ -37,8 +38,40 @@ const RESPONSE_SCHEMA: Schema = {
         required: ['room_area', 'item', 'condition', 'observed_evidence', 'recommended_action', 'trade_category', 'assigned_to', 'priority', 'source_timestamp'],
       },
     },
+    // 9355 Sylvia audit (2026-09-30): there was no field for a measurement,
+    // so narrated room dimensions only survived when the model happened to
+    // fold them into observed_evidence -- every bedroom's were lost.
+    room_measurements: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          room_area: { type: Type.STRING, description: 'Exactly the same room_area name used for this room in line_items' },
+          what_measured: { type: Type.STRING, description: 'e.g. "Room", "Closet", "Window", "Wall register", "Furnace filter"' },
+          measurement: { type: Type.STRING, description: 'Exactly as spoken or read, units preserved, e.g. "10 x 14", "14 x 11 1/2", "32 in"' },
+          source: { type: Type.STRING, enum: ['Narrated', 'Visually read', 'Both'] },
+          source_timestamp: { type: Type.STRING, description: 'e.g. "1:05"' },
+        },
+        required: ['room_area', 'what_measured', 'measurement', 'source', 'source_timestamp'],
+      },
+    },
+    // Same audit: drives per-room video clips (processNextInspectionVideo
+    // cuts each span out with ffmpeg) and the room-continuity carry-over
+    // into the next split segment.
+    room_segments: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          room_area: { type: Type.STRING, description: 'Exactly the same room_area name used for this room in line_items' },
+          start_timestamp: { type: Type.STRING, description: 'When the camera enters/begins showing this room, e.g. "2:49"' },
+          end_timestamp: { type: Type.STRING, description: 'When the camera leaves this room, e.g. "4:10"' },
+        },
+        required: ['room_area', 'start_timestamp', 'end_timestamp'],
+      },
+    },
   },
-  required: ['line_items'],
+  required: ['line_items', 'room_measurements', 'room_segments'],
 }
 
 // Adapted from prompts/inspection-report-prompt-v1.md (validated 2026-09-09
@@ -81,9 +114,45 @@ GPM Maintenance Staff (default), everything else: minor carpentry and hardware (
 
 Classification notes: painting is vendor-scope as a whole category, not just "large jobs" -- if recommended_action includes repainting a surface, route the whole task to the vendor even if part of it is a GPM-scope patch. Drywall is size-gated: under one sheet with no repaint stays GPM; over one sheet, or any repaint requirement, goes to the vendor. Electrical is scope-gated: securing/cleaning outlets/switches/cover plates is GPM; rewiring or breaker box work is vendor. If a finding is ambiguous or spans both, default to Outside Vendor if any part of the combined job touches a vendor-scope category. Use "Other" only when the item genuinely doesn't fit GPM staff or a normal outside trade vendor (e.g. a specialist evaluation).
 
+## Room names
+
+Use one consistent name per room for the whole inspection, in every field (line_items, room_measurements, room_segments). When a house has more than one of a room type, number them in the order the inspector names or visits them -- "Bedroom 1", "Bedroom 2", "Bedroom 3", "Bathroom 1", "Bathroom 2" -- and never fall back to a generic "Bedroom" or "Bathroom" for one of them. Use the inspector's own narrated name for a room whenever one is given. A closet belongs to the room it opens off (e.g. "Bedroom 3", item "Closet"), not a room of its own, unless it is a hallway/linen closet.
+
+## Measurements
+
+Record every measurement that is spoken or clearly readable (e.g. a tape measure in frame) in room_measurements -- room dimensions especially ("bedroom one, 10 by 14"), plus closets, windows, doors, registers, filters, and any other quantity or size given. Preserve the measurement exactly as stated, units and fractions included; do not convert or round it. Never estimate a dimension the inspector did not state or show. You may also mention a measurement in a line item's observed_evidence where it's relevant, but it must always appear in room_measurements.
+
+## Room segments
+
+In room_segments, list every contiguous span of the video spent in each room or area, in order, from the first frame to the last, with start and end timestamps. Every moment of the video should fall inside exactly one span. If the video begins partway through a room, the first span starts at "0:00".
+
 ## Output
 
 Return one entry per distinct inspected item/finding via the structured schema. Use "Unable to determine" for source_timestamp only when genuinely not clear from the video.`
+
+// The video is one of several split segments of a single walkthrough (see
+// scripts/split-video.mjs -- phone videos are cut into ~3min pieces), each
+// sent to Gemini on its own. Without this, a segment that opens mid-room has
+// no way to know which room it is (9355 Sylvia: the second half of Bedroom 3
+// came back as just "Bedroom").
+export type SegmentContext = {
+  roomsSoFar: string[]
+  previousLastRoom: string | null
+}
+
+function contextBlock(ctx: SegmentContext | undefined): string {
+  if (!ctx || (ctx.roomsSoFar.length === 0 && !ctx.previousLastRoom)) return ''
+  const lines = ['', '## Earlier in this same inspection', '', 'This video is a continuation of the same walkthrough as earlier videos of this property.']
+  if (ctx.roomsSoFar.length > 0) {
+    lines.push(`Rooms already identified in earlier videos (reuse these exact names for the same rooms): ${ctx.roomsSoFar.join(', ')}.`)
+  }
+  if (ctx.previousLastRoom) {
+    lines.push(
+      `The previous video ended in "${ctx.previousLastRoom}". If this video opens in that same room, keep calling it "${ctx.previousLastRoom}" until the inspector moves to a different room.`,
+    )
+  }
+  return lines.join('\n')
+}
 
 async function waitForFileActive(client: GoogleGenAI, name: string) {
   let file = await client.files.get({ name })
@@ -109,6 +178,12 @@ export type ExtractedLineItem = {
   assigned_to: 'GPM Staff' | 'Outside Vendor' | 'Other'
   priority: string
   source_timestamp: string
+}
+
+export type ExtractedInspection = {
+  line_items: ExtractedLineItem[]
+  room_measurements: RoomMeasurement[]
+  room_segments: RoomSegment[]
 }
 
 // Confirmed live during manual testing (2026-09-11): Gemini returns a real,
@@ -138,7 +213,7 @@ async function generateContentWithRetry(
 // (plan-eng-review, 2026-09-24): the caller streams the video to one shared
 // temp file, reused here and for ffmpeg, instead of this function writing
 // its own second copy. `client.files.upload` reads the path directly.
-export async function extractLineItemsFromVideo(videoPath: string): Promise<ExtractedLineItem[]> {
+export async function extractInspectionFromVideo(videoPath: string, context?: SegmentContext): Promise<ExtractedInspection> {
   const client = getClient()
   const uploaded = await client.files.upload({ file: videoPath, config: { mimeType: 'video/mp4' } })
   if (!uploaded.name) throw new Error('Gemini did not return a file name for the uploaded video.')
@@ -149,7 +224,7 @@ export async function extractLineItemsFromVideo(videoPath: string): Promise<Extr
 
     const response = await generateContentWithRetry(client, {
       model: MODEL,
-      contents: createUserContent([createPartFromUri(file.uri, file.mimeType), PROMPT]),
+      contents: createUserContent([createPartFromUri(file.uri, file.mimeType), PROMPT + contextBlock(context)]),
       config: {
         responseMimeType: 'application/json',
         responseSchema: RESPONSE_SCHEMA,
@@ -159,7 +234,7 @@ export async function extractLineItemsFromVideo(videoPath: string): Promise<Extr
     const text = response.text
     if (!text) throw new Error('Gemini returned an empty response.')
 
-    let parsed: { line_items: ExtractedLineItem[] }
+    let parsed: Partial<ExtractedInspection>
     try {
       parsed = JSON.parse(text)
     } catch {
@@ -168,7 +243,13 @@ export async function extractLineItemsFromVideo(videoPath: string): Promise<Extr
     if (!Array.isArray(parsed.line_items)) {
       throw new Error('Gemini response was missing the expected line_items array.')
     }
-    return parsed.line_items
+    // room_measurements/room_segments are schema-required, but a missing one
+    // is degraded output, not a reason to throw away the line items.
+    return {
+      line_items: parsed.line_items,
+      room_measurements: Array.isArray(parsed.room_measurements) ? parsed.room_measurements : [],
+      room_segments: Array.isArray(parsed.room_segments) ? parsed.room_segments : [],
+    }
   } finally {
     await client.files.delete({ name: uploaded.name }).catch(() => {}) // best-effort cleanup, not worth failing the whole job over
   }

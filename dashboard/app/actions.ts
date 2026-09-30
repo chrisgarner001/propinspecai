@@ -3,9 +3,18 @@
 import { getSql } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { parseFolderIdFromUrl, listVideosInFolder, downloadDriveFileToPath } from '@/lib/google'
-import { extractLineItemsFromVideo } from '@/lib/gemini'
-import { parseTimestampSeconds, extractFrame, uploadStill, getVideoCreationTime } from '@/lib/stills'
+import {
+  parseFolderIdFromUrl,
+  listVideosInFolder,
+  downloadDriveFileToPath,
+  ensureSubfolder,
+  uploadVideoToFolder,
+  trashDriveFile,
+  ROOM_CLIPS_FOLDER_NAME,
+} from '@/lib/google'
+import { extractInspectionFromVideo, type ExtractedInspection } from '@/lib/gemini'
+import { parseTimestampSeconds, extractFrame, uploadStill, getVideoCreationTime, cutClip, cutClipToStream, hasTmpSpaceFor } from '@/lib/stills'
+import { compareVideoFilenames, continueRoomLabelAcrossSeam, toClipSpans, lastRoomOf, formatSeconds } from '@/lib/rooms'
 import { SIZE_REJECTION_MARKER } from '@/lib/videoProcessing'
 import { askHelpAssistant, type HelpMessage } from '@/lib/helpAssistant'
 import { getPageContext } from '@/lib/helpContext'
@@ -15,6 +24,7 @@ import { join } from 'node:path'
 import { randomUUID, randomBytes } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import { requireSessionOrThrow, requireAdminOrThrow } from '@/lib/dal'
+import { findWorkOrderByNumber, getBuildingAddress } from '@/lib/propertyware'
 import { sendTempPasswordEmail } from '@/lib/mail'
 import { embedText, toVectorLiteral } from '@/lib/embeddings'
 
@@ -941,6 +951,37 @@ export async function createInspection(formData: FormData) {
   redirect(`/inspections/${row.id}`)
 }
 
+// "Look up" on the new-inspection form (2026-09-30): pulls the property
+// address from the Propertyware work order so it isn't retyped. Called
+// directly from a client component's onClick, not a <form>, same reasoning
+// as createImageShareLink -- the client needs the result back to fill the
+// address field. Never throws: any failure comes back as a message and the
+// reviewer can still type the address by hand.
+export async function lookupPropertywareWorkOrder(
+  workOrderNumberRaw: string,
+): Promise<{ propertyAddress?: string; description?: string; warning?: string; error?: string }> {
+  await requireSessionOrThrow()
+  const workOrderNumber = Number(workOrderNumberRaw.trim())
+  if (!Number.isInteger(workOrderNumber) || workOrderNumber <= 0) {
+    return { error: 'Work order number must be a whole number.' }
+  }
+  try {
+    const workOrder = await findWorkOrderByNumber(workOrderNumber)
+    if (!workOrder) return { error: `Work order #${workOrderNumber} wasn't found in Propertyware. Enter the address manually.` }
+    const building = workOrder.buildingID ? await getBuildingAddress(workOrder.buildingID) : null
+    if (!building) {
+      return {
+        description: workOrder.description,
+        warning: "Found the work order, but Propertyware has no mailing address for it. Enter the address manually.",
+      }
+    }
+    return { propertyAddress: building.propertyAddress, description: workOrder.description }
+  } catch (err) {
+    console.error('Propertyware lookup failed:', (err as Error).message)
+    return { error: 'Propertyware lookup failed. Enter the address manually.' }
+  }
+}
+
 // Both fields are optional and manually entered -- no PMS integration exists
 // to pull them from (2026-09-22 feedback: wanted as a merged exhibit on the
 // Move-Out Report, same as zinspector does, but GPM has no source system
@@ -1291,6 +1332,134 @@ export async function syncInspectionVideos(inspectionId: string): Promise<{ erro
   return { videos }
 }
 
+type VideoForProcessing = { id: string; drive_file_id: string; filename: string; size_bytes: string | null; status: string }
+
+// Rooms already named in this inspection's earlier (recording-order)
+// segments, and the room the immediately preceding segment ended in -- fed
+// into the Gemini prompt so a segment that opens mid-room keeps that room's
+// name (9355 Sylvia: the second half of "Bedroom 3" came back as "Bedroom").
+// previousLastRoom is only set when the immediately preceding segment has
+// actually been processed; an unprocessed gap means there's no reliable
+// "where we just were" to carry forward.
+async function buildSegmentContext(
+  inspectionId: string,
+  sortedVideos: VideoForProcessing[],
+  currentVideoId: string,
+): Promise<{ roomsSoFar: string[]; previousLastRoom: string | null }> {
+  const sql = getSql()
+  const index = sortedVideos.findIndex((v) => v.id === currentVideoId)
+  const earlier = sortedVideos.slice(0, Math.max(0, index)).filter((v) => v.status === 'done')
+  if (earlier.length === 0) return { roomsSoFar: [], previousLastRoom: null }
+
+  const rows = await sql`
+    select room_area from line_items
+    where inspection_id = ${inspectionId} and source_video_drive_file_id in ${sql(earlier.map((v) => v.drive_file_id))}
+    union
+    select room_area from room_clips where inspection_video_id in ${sql(earlier.map((v) => v.id))}
+  `
+  const roomsSoFar = [...new Set(rows.map((r) => String(r.room_area).trim()))].sort()
+
+  const previous = index > 0 ? sortedVideos[index - 1] : null
+  let previousLastRoom: string | null = null
+  if (previous?.status === 'done') {
+    const spans = await sql`select room_area, start_seconds, end_seconds from room_clips where inspection_video_id = ${previous.id}`
+    previousLastRoom = lastRoomOf(
+      spans.map((r) => ({ room_area: r.room_area, start_seconds: Number(r.start_seconds), end_seconds: Number(r.end_seconds) })),
+    )
+  }
+  return { roomsSoFar, previousLastRoom }
+}
+
+// Stores the segment's measurements and room spans, then cuts and uploads
+// one clip per span (9355 Sylvia audit, 2026-09-30). Replaces anything a
+// previous run of this same video left behind, so a retry is idempotent.
+// The clip cut/upload is best-effort, same as stills: the span row is
+// written first, so a failed or skipped upload still leaves the dashboard a
+// "source video @ start time" fallback, and never fails the video.
+async function saveRoomMeasurementsAndClips(
+  inspectionId: string,
+  video: VideoForProcessing,
+  extraction: ExtractedInspection,
+  videoTempPath: string,
+) {
+  const sql = getSql()
+
+  const stale = await sql`select drive_file_id from room_clips where inspection_video_id = ${video.id} and drive_file_id is not null`
+  for (const row of stale) {
+    await trashDriveFile(row.drive_file_id).catch((err) =>
+      console.error(`Could not trash stale room clip ${row.drive_file_id}:`, (err as Error).message),
+    )
+  }
+  await sql`delete from room_clips where inspection_video_id = ${video.id}`
+  await sql`delete from room_measurements where inspection_video_id = ${video.id}`
+
+  for (const m of extraction.room_measurements) {
+    await sql`
+      insert into room_measurements (inspection_id, inspection_video_id, room_area, what_measured, measurement, source, source_timestamp)
+      values (${inspectionId}, ${video.id}, ${m.room_area.trim()}, ${m.what_measured}, ${m.measurement}, ${m.source}, ${m.source_timestamp})
+    `
+  }
+
+  const spans = toClipSpans(extraction.room_segments)
+  if (spans.length === 0) return
+
+  const [inspection] = await sql`select source_video_drive_folder_url from inspections where id = ${inspectionId}`
+  const parentFolderId = inspection?.source_video_drive_folder_url
+    ? parseFolderIdFromUrl(inspection.source_video_drive_folder_url)
+    : null
+  const clipsFolderId = parentFolderId
+    ? await ensureSubfolder(parentFolderId, ROOM_CLIPS_FOLDER_NAME).catch((err) => {
+        console.error('Could not create/find the Room Clips Drive folder:', (err as Error).message)
+        return null
+      })
+    : null
+
+  // Duration isn't known up front; the last span's end is a close lower
+  // bound (the prompt asks for spans covering the whole video), which only
+  // makes the per-clip disk estimate below slightly conservative.
+  const videoSeconds = Math.max(...spans.map((s) => s.end_seconds))
+  const baseName = video.filename.replace(/\.[^.]+$/, '')
+
+  for (const span of spans) {
+    const [{ id: clipId }] = await sql`
+      insert into room_clips (inspection_id, inspection_video_id, room_area, start_seconds, end_seconds)
+      values (${inspectionId}, ${video.id}, ${span.room_area}, ${span.start_seconds}, ${span.end_seconds})
+      returning id
+    `
+    if (!clipsFolderId || video.size_bytes === null) continue
+
+    const range = `${formatSeconds(span.start_seconds)}-${formatSeconds(span.end_seconds)}`.replace(/:/g, '.')
+    const clipName = `${baseName} - ${span.room_area.replace(/[\\/:*?"<>|]/g, '')} (${range}).mp4`
+    const estimatedBytes = (Number(video.size_bytes) * (span.end_seconds - span.start_seconds)) / videoSeconds
+
+    let clipPath: string | null = null
+    try {
+      let driveFileId: string
+      if (await hasTmpSpaceFor(estimatedBytes)) {
+        clipPath = await cutClip(videoTempPath, span.start_seconds, span.end_seconds)
+        driveFileId = await uploadVideoToFolder(clipPath, clipName, clipsFolderId)
+      } else {
+        // Won't fit in /tmp next to the source -- pipe ffmpeg straight into
+        // the Drive upload instead. If ffmpeg fails partway, whatever was
+        // uploaded is a truncated clip and gets trashed, not kept.
+        const { stream, done } = cutClipToStream(videoTempPath, span.start_seconds, span.end_seconds)
+        const [upload, cut] = await Promise.allSettled([uploadVideoToFolder(stream, clipName, clipsFolderId), done])
+        if (cut.status === 'rejected') {
+          if (upload.status === 'fulfilled') await trashDriveFile(upload.value).catch(() => {})
+          throw cut.reason
+        }
+        if (upload.status === 'rejected') throw upload.reason
+        driveFileId = upload.value
+      }
+      await sql`update room_clips set drive_file_id = ${driveFileId}, filename = ${clipName} where id = ${clipId}`
+    } catch (err) {
+      console.error(`Room clip ${clipName} failed:`, (err as Error).message)
+    } finally {
+      if (clipPath) await unlink(clipPath).catch(() => {})
+    }
+  }
+}
+
 // Processes exactly one pending video per call -- called in a loop from the
 // client so each request stays short (download + Gemini analysis for a
 // single clip, not the whole batch) and progress is visible after every
@@ -1301,12 +1470,16 @@ export async function syncInspectionVideos(inspectionId: string): Promise<{ erro
 export async function processNextInspectionVideo(inspectionId: string): Promise<{ done: boolean; videos: InspectionVideoRow[] }> {
   await requireSessionOrThrow()
   const sql = getSql()
-  const [next] = await sql`
-    select id, drive_file_id, filename, size_bytes from inspection_videos
-    where inspection_id = ${inspectionId} and status = 'pending'
-    order by created_at
-    limit 1
-  `
+  // Recording order, not sync order (9355 Sylvia audit, 2026-09-30): each
+  // segment's prompt now carries forward the rooms found in the segments
+  // BEFORE it (buildSegmentContext above), which only means anything if
+  // those segments really were earlier in the walkthrough. Sylvia's rows
+  // were synced part2-before-part1, and created_at order processed them so.
+  const allVideos = ((await sql`
+    select id, drive_file_id, filename, size_bytes, status from inspection_videos
+    where inspection_id = ${inspectionId}
+  `) as unknown as VideoForProcessing[]).sort((a, b) => compareVideoFilenames(a.filename, b.filename))
+  const next = allVideos.find((v) => v.status === 'pending')
 
   if (next) {
     // Pre-flight size check (plan-eng-review, 2026-09-24) -- rejects before
@@ -1337,7 +1510,12 @@ export async function processNextInspectionVideo(inspectionId: string): Promise<
         // memory/disk savings, not just tidiness (plan-eng-review, 2026-09-24).
         const videoTempPath = join(tmpdir(), `propinspec-video-${randomUUID()}.mp4`)
         await downloadDriveFileToPath(next.drive_file_id, videoTempPath)
-        const extracted = await extractLineItemsFromVideo(videoTempPath)
+        const segmentContext = await buildSegmentContext(inspectionId, allVideos, next.id)
+        const extraction = continueRoomLabelAcrossSeam(
+          await extractInspectionFromVideo(videoTempPath, segmentContext),
+          segmentContext.previousLastRoom,
+        )
+        const extracted = extraction.line_items
 
         // One creation_time per video, not per frame -- see getVideoCreationTime's
         // own comment for why GPS isn't available but this is. Null on any
@@ -1373,6 +1551,15 @@ export async function processNextInspectionVideo(inspectionId: string): Promise<
                 console.error(`Still extraction failed for line item ${lineItemId}:`, (stillErr as Error).message)
               }
             }
+          }
+
+          // Line items are already committed at this point -- a failure here
+          // must not mark the video 'failed', or a retry would insert every
+          // line item a second time.
+          try {
+            await saveRoomMeasurementsAndClips(inspectionId, next, extraction, videoTempPath)
+          } catch (roomErr) {
+            console.error(`Room measurements/clips failed for ${next.filename}:`, (roomErr as Error).message)
           }
         } finally {
           await unlink(videoTempPath).catch(() => {})
