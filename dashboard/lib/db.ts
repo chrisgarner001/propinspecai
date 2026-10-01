@@ -17,7 +17,20 @@ export function getSql(): ReturnType<typeof postgres> {
     if (!url) {
       throw new Error('DATABASE_URL is not set')
     }
-    globalThis.__propinspec_sql = postgres(url, { ssl: 'require' })
+    // Connection budget (2026-10-01, 35852 Beverly): DATABASE_URL is
+    // Supabase's SESSION-mode pooler, which allows only 15 client
+    // connections in total, shared by every Vercel instance, local scripts,
+    // and the test suite. postgres.js defaults (max 10 per instance, idle
+    // connections never closed) let a few warm instances hold every slot, so
+    // the next request failed with EMAXCONNSESSION ("max clients reached"),
+    // surfacing as "Not authenticated" from verifySession. Small per-instance
+    // pools that release idle connections keep slots free.
+    globalThis.__propinspec_sql = postgres(url, {
+      ssl: 'require',
+      max: process.env.VITEST ? 2 : 3,
+      idle_timeout: 20,
+      max_lifetime: 60 * 30,
+    })
   }
   return globalThis.__propinspec_sql
 }
