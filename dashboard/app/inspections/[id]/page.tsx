@@ -331,6 +331,17 @@ export default async function InspectionPage({
               const roomSize = room.measurements.find((m) => m.what_measured.trim().toLowerCase() === 'room')
               const otherMeasurements = room.measurements.filter((m) => m !== roomSize)
               return (
+        {/* Read-only count beside the deposit (2026-10-01 request), so the
+            size of the report is visible before scrolling the whole table. */}
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1">Inspection Items</div>
+          <div
+            className="data-mono border border-border rounded-[var(--radius-sm)] px-2.5 py-1.5 min-w-16 bg-surface-alt text-[13px] text-center"
+            title={`${lineItems.length} line items across ${areas.length} rooms/areas`}
+          >
+            {lineItems.length}
+          </div>
+        </div>
                 <div key={room.name} className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,2fr)] gap-x-4 gap-y-1 px-3 py-2">
                   <a
                     href={`#${areaAnchor(room.name)}`}
