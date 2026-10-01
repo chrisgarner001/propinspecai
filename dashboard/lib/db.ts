@@ -25,8 +25,16 @@ export function getSql(): ReturnType<typeof postgres> {
     // the next request failed with EMAXCONNSESSION ("max clients reached"),
     // surfacing as "Not authenticated" from verifySession. Small per-instance
     // pools that release idle connections keep slots free.
+    //
+    // Production's DATABASE_URL moved to the TRANSACTION-mode pooler (port
+    // 6543) the same day: it hands the real database connection back after
+    // every transaction, so idle serverless instances no longer hold any of
+    // the 15. Transaction mode can't keep prepared statements across
+    // requests, hence prepare: false (harmless on the session pooler too,
+    // which local scripts and tests still use).
     globalThis.__propinspec_sql = postgres(url, {
       ssl: 'require',
+      prepare: false,
       max: process.env.VITEST ? 2 : 3,
       idle_timeout: 20,
       max_lifetime: 60 * 30,

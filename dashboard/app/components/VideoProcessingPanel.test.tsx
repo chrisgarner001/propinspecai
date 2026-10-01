@@ -104,3 +104,18 @@ describe('VideoProcessingPanel "Copy split command" button', () => {
     expect(fallbackInput).toBeInTheDocument()
   })
 })
+
+// Regression (2026-10-01, 35852 Beverly): a sync call that THREW (rather
+// than returning { error }) left the button stuck on "Checking…" forever.
+describe('Check for new videos -- failure recovery', () => {
+  it('resets the button and shows the reason when the sync call throws', async () => {
+    const { syncInspectionVideos } = await import('@/app/actions')
+    vi.mocked(syncInspectionVideos).mockRejectedValueOnce(new Error('Not authenticated'))
+
+    render(<VideoProcessingPanel inspectionId="insp-1" initialVideos={[otherFailureVideo]} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Check for new videos' }))
+
+    expect(await screen.findByText(/Couldn't check for new videos: Not authenticated/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Check for new videos' })).toBeTruthy()
+  })
+})

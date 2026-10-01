@@ -59,7 +59,18 @@ export default function VideoProcessingPanel({
     setRunning(true)
     setBannerError(null)
     setGateCheckBanner(null)
-    const result = await syncInspectionVideos(inspectionId)
+    // A thrown sync (network drop, or 2026-10-01's database-connection
+    // exhaustion surfacing as "Not authenticated") used to skip
+    // setRunning(false) entirely, leaving the button stuck on "Checking…"
+    // until a page reload. runLoop() below already had this protection.
+    let result: Awaited<ReturnType<typeof syncInspectionVideos>>
+    try {
+      result = await syncInspectionVideos(inspectionId)
+    } catch (err) {
+      setBannerError(`Couldn't check for new videos: ${(err as Error).message}. Try again in a moment.`)
+      setRunning(false)
+      return
+    }
     if (result.error) {
       setBannerError(result.error)
       setRunning(false)
@@ -87,8 +98,14 @@ export default function VideoProcessingPanel({
   }
 
   async function handleRetry(videoRowId: string) {
-    const result = await retryInspectionVideo(videoRowId, inspectionId)
-    setVideos(result.videos)
+    setBannerError(null)
+    try {
+      const result = await retryInspectionVideo(videoRowId, inspectionId)
+      setVideos(result.videos)
+    } catch (err) {
+      setBannerError(`Couldn't retry: ${(err as Error).message}. Try again in a moment.`)
+      return
+    }
     await runLoop()
   }
 
