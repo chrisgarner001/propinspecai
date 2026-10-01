@@ -65,7 +65,7 @@ export default function WorkOrderLookupFields({
           </button>
         </div>
         {message ? (
-          <div className={`text-[12px] mt-1 ${message.tone === 'ok' ? 'text-success' : 'text-fair'}`}>{message.text}</div>
+          <div className={`text-[12px] mt-1 ${message.tone === 'ok' ? 'text-text-muted' : 'text-error'}`}>{message.text}</div>
         ) : (
           <div className={helpClass}>Look up fills the property address from the Propertyware work order.</div>
         )}

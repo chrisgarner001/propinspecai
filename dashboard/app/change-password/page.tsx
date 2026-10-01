@@ -6,7 +6,7 @@ import ChangePasswordForm from '@/app/components/ChangePasswordForm'
 // account with must_change_password) or visited directly. skipPasswordCheck
 // avoids requireSession() redirecting this page to itself.
 export default async function ChangePasswordPage() {
-  await requireSession({ skipPasswordCheck: true })
+  await requireSession({ skipPasswordCheck: true, allowInspector: true })
 
   return (
     <div className="min-h-screen flex items-center justify-center">

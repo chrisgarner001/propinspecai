@@ -639,7 +639,7 @@ describe('video processing pipeline', () => {
 
       // The second segment's prompt was told where the first one ended...
       const secondCallContext = mockExtractLineItemsFromVideo.mock.calls[1][1]
-      expect(secondCallContext).toEqual({ roomsSoFar: ['Bedroom 2', 'Bedroom 3'], previousLastRoom: 'Bedroom 3' })
+      expect(secondCallContext).toEqual({ plannedRooms: [], roomsSoFar: ['Bedroom 2', 'Bedroom 3'], previousLastRoom: 'Bedroom 3' })
 
       // ...and the generic "Bedroom" it came back with anyway is corrected
       // everywhere, while a genuinely new room (Bathroom) is left alone.

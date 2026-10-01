@@ -15,6 +15,9 @@ import CreateBatchesButton from '@/app/components/CreateBatchesButton'
 import InspectionQuickView from '@/app/components/InspectionQuickView'
 import type { InspectionVideoRow } from '@/app/actions'
 import { compareVideoFilenames, findClipForLineItem, formatSeconds } from '@/lib/rooms'
+import { isGuidedInspectionRequired } from '@/lib/roomPlan'
+import { signFieldPhotoUrls } from '@/lib/fieldPhotos'
+import FieldPhotoFrame from '@/app/components/FieldPhotoFrame'
 
 // Raised from the platform default for processNextInspectionVideo (called
 // from this page via VideoProcessingPanel) -- downloading a multi-minute
@@ -127,10 +130,36 @@ export default async function InspectionPage({
     (a, b) => compareVideoFilenames(a.source_filename, b.source_filename) || a.start_seconds - b.start_seconds,
   )
 
-  // Rooms in walkthrough order (first clip appearance), then any room that
-  // only exists as a line item (manual additions, pre-audit inspections).
+  // Guided Inspection (docs/designs/propinspec-guided-inspection.md): what
+  // the inspector captured on the iPad before recording.
+  const roomPlan = (await sql`
+    select room_name, photo_path from inspection_room_plan where inspection_id = ${id} order by sort_order, created_at
+  `) as unknown as { room_name: string; photo_path: string | null }[]
+  const checklistResponses = (await sql`
+    select r.label, r.text_value, r.photo_path
+    from inspection_checklist_responses r
+    left join checklist_items c on c.id = r.checklist_item_id
+    where r.inspection_id = ${id} and (r.text_value is not null or r.photo_path is not null)
+    order by c.sort_order, r.updated_at
+  `) as unknown as { label: string; text_value: string | null; photo_path: string | null }[]
+  const [guided] = await sql`
+    select s.guided_inspection_required as master_on, t.guided_inspection_required as type_on
+    from settings s left join inspection_types t on t.name = ${inspection.inspection_type}
+    where s.id = true
+  `
+  const guidedRequired = isGuidedInspectionRequired(!!guided?.master_on, !!guided?.type_on)
+  const fieldPhotoUrls = await signFieldPhotoUrls([
+    ...roomPlan.map((r) => r.photo_path),
+    ...checklistResponses.map((r) => r.photo_path),
+  ])
+  const hasFieldData = roomPlan.length > 0 || checklistResponses.length > 0
+
+  // Rooms in the inspector's planned order when there is one, then
+  // walkthrough order (first clip appearance), then any room that only
+  // exists as a line item (manual additions, pre-audit inspections).
   const roomKey = (r: string) => r.trim().toLowerCase()
   const roomNames = new Map<string, string>()
+  for (const r of roomPlan) if (!roomNames.has(roomKey(r.room_name))) roomNames.set(roomKey(r.room_name), r.room_name)
   for (const c of roomClips) if (!roomNames.has(roomKey(c.room_area))) roomNames.set(roomKey(c.room_area), c.room_area)
   for (const a of areas) if (!roomNames.has(roomKey(a))) roomNames.set(roomKey(a), a)
   for (const m of roomMeasurements) if (!roomNames.has(roomKey(m.room_area))) roomNames.set(roomKey(m.room_area), m.room_area)
@@ -138,8 +167,9 @@ export default async function InspectionPage({
     name,
     measurements: roomMeasurements.filter((m) => roomKey(m.room_area) === roomKey(name)),
     clips: roomClips.filter((c) => roomKey(c.room_area) === roomKey(name)),
+    photoPath: roomPlan.find((r) => roomKey(r.room_name) === roomKey(name))?.photo_path ?? null,
   }))
-  const hasRoomData = roomMeasurements.length > 0 || roomClips.length > 0
+  const hasRoomData = roomMeasurements.length > 0 || roomClips.length > 0 || roomPlan.length > 0
 
   const quoteActionsVisible = QUOTE_ACTIONS_VISIBLE_STATUSES.includes(inspection.status)
   // Quote Sheet / Tenant Chargeback Review / everything downstream of them
@@ -334,6 +364,44 @@ export default async function InspectionPage({
         </div>
       )}
 
+      {(hasFieldData || guidedRequired) && (
+        <div className="px-4 md:px-6 py-3 border-b border-border">
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+              Field inspection
+              {inspection.field_completed_at ? (
+                <span className="normal-case tracking-normal font-normal">
+                  {' '}
+                  · completed{' '}
+                  <span className="data-mono">{new Date(inspection.field_completed_at).toLocaleString('en-US')}</span>
+                </span>
+              ) : (
+                <span className="normal-case tracking-normal font-normal">
+                  {' '}
+                  · not marked complete{guidedRequired ? ' (required before videos can be processed)' : ''}
+                </span>
+              )}
+            </h2>
+            <a href={`/field/${id}`} className="text-[12px] font-semibold text-accent underline decoration-accent/40 hover:text-accent-hover">
+              Open field view
+            </a>
+          </div>
+          {checklistResponses.length === 0 ? (
+            <div className="text-[12px] text-text-muted">No checklist answers yet.</div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {checklistResponses.map((r) => (
+                <div key={r.label} className="min-w-0">
+                  <div className="text-[12px] font-semibold">{r.label}</div>
+                  {r.text_value && <div className="text-[12px] text-text-muted whitespace-pre-wrap mb-1">{r.text_value}</div>}
+                  {r.photo_path && <FieldPhotoFrame url={fieldPhotoUrls.get(r.photo_path)} caption={r.label} className="w-full max-w-[280px]" />}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {hasRoomData && (
         <div className="px-4 md:px-6 py-3 border-b border-border">
           <h2 className="text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-2">Rooms</h2>
@@ -343,12 +411,17 @@ export default async function InspectionPage({
               const otherMeasurements = room.measurements.filter((m) => m !== roomSize)
               return (
                 <div key={room.name} className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,2fr)] gap-x-4 gap-y-1 px-3 py-2">
-                  <a
-                    href={`#${areaAnchor(room.name)}`}
-                    className="text-[12px] font-bold uppercase text-accent hover:text-accent-hover truncate"
-                  >
-                    {room.name}
-                  </a>
+                  <div className="min-w-0 space-y-1">
+                    <a
+                      href={`#${areaAnchor(room.name)}`}
+                      className="block text-[12px] font-bold uppercase text-accent hover:text-accent-hover truncate"
+                    >
+                      {room.name}
+                    </a>
+                    {room.photoPath && (
+                      <FieldPhotoFrame url={fieldPhotoUrls.get(room.photoPath)} caption={`${room.name} · wide`} className="w-40" />
+                    )}
+                  </div>
                   <div className="text-[12px] min-w-0">
                     {roomSize ? (
                       <span className="data-mono" title={roomSize.source}>{roomSize.measurement}</span>

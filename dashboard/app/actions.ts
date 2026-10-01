@@ -17,6 +17,7 @@ import { probeDriveVideoSeconds, cutDriveVideoPartToStream, splitPartCount, spli
 import { extractInspectionFromVideo, type ExtractedInspection } from '@/lib/gemini'
 import { parseTimestampSeconds, extractFrame, uploadStill, getVideoCreationTime, cutClip, cutClipToStream, hasTmpSpaceFor } from '@/lib/stills'
 import { compareVideoFilenames, continueRoomLabelAcrossSeam, toClipSpans, lastRoomOf, formatSeconds } from '@/lib/rooms'
+import { isGuidedInspectionRequired } from '@/lib/roomPlan'
 import { SIZE_REJECTION_MARKER } from '@/lib/videoProcessing'
 import { askHelpAssistant, type HelpMessage } from '@/lib/helpAssistant'
 import { getPageContext } from '@/lib/helpContext'
@@ -1104,6 +1105,78 @@ export async function deleteInspectionType(typeId: string) {
   revalidatePath('/setup/inspection-types')
 }
 
+// System Config > Guided Inspection (docs/designs/propinspec-guided-inspection.md).
+// One form: the master switch plus an On/Off radio per inspection type
+// (`type__<id>`). Enforcement (blocking video processing until the field
+// steps are complete) needs BOTH on -- see lib/roomPlan.ts.
+export async function updateGuidedInspectionSettings(formData: FormData) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  await sql`update settings set guided_inspection_required = ${formData.get('master') === 'on'} where id = true`
+  const types = await sql`select id from inspection_types`
+  for (const t of types) {
+    const value = formData.get(`type__${t.id}`)
+    if (value === 'on' || value === 'off') {
+      await sql`update inspection_types set guided_inspection_required = ${value === 'on'} where id = ${t.id}`
+    }
+  }
+  revalidatePath('/setup/guided-inspection')
+}
+
+const CHECKLIST_KINDS = ['text', 'photo', 'text_photo']
+
+export async function createChecklistItem(formData: FormData) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  const label = String(formData.get('label') ?? '').trim().slice(0, 120)
+  const helpText = String(formData.get('help_text') ?? '').trim().slice(0, 300) || null
+  const kind = String(formData.get('kind') ?? 'text_photo')
+  if (!label || !CHECKLIST_KINDS.includes(kind)) return
+  await sql`
+    insert into checklist_items (label, help_text, kind, sort_order)
+    values (${label}, ${helpText}, ${kind}, (select coalesce(max(sort_order), 0) + 10 from checklist_items))
+  `
+  revalidatePath('/setup/guided-inspection')
+}
+
+// Edits an item in place. Inspections that already answered it keep the
+// label they were answered under (inspection_checklist_responses.label is a
+// snapshot); new answers pick up the new label.
+export async function updateChecklistItem(itemId: string, formData: FormData) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  const label = String(formData.get('label') ?? '').trim().slice(0, 120)
+  const helpText = String(formData.get('help_text') ?? '').trim().slice(0, 300) || null
+  const kind = String(formData.get('kind') ?? '')
+  if (!label || !CHECKLIST_KINDS.includes(kind)) return
+  await sql`update checklist_items set label = ${label}, help_text = ${helpText}, kind = ${kind} where id = ${itemId}`
+  revalidatePath('/setup/guided-inspection')
+}
+
+// Deactivates rather than deletes: inspections that already answered this
+// item keep the answer (and its label snapshot) on their record.
+export async function removeChecklistItem(itemId: string) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  await sql`update checklist_items set active = false where id = ${itemId}`
+  revalidatePath('/setup/guided-inspection')
+}
+
+export async function moveChecklistItem(itemId: string, direction: 'up' | 'down') {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  const items = await sql`select id from checklist_items where active order by sort_order, created_at`
+  const ids = items.map((r) => String(r.id))
+  const i = ids.indexOf(itemId)
+  const j = direction === 'up' ? i - 1 : i + 1
+  if (i < 0 || j < 0 || j >= ids.length) return
+  ;[ids[i], ids[j]] = [ids[j], ids[i]]
+  for (const [order, id] of ids.entries()) {
+    await sql`update checklist_items set sort_order = ${(order + 1) * 10} where id = ${id}`
+  }
+  revalidatePath('/setup/guided-inspection')
+}
+
 // A convenience catalog for the Inspector dropdown on Add New Inspection --
 // inspections.inspector_name stays free text (not a foreign key), since the
 // user explicitly wants "a dropdown or fill in", not a hard-constrained list.
@@ -1275,6 +1348,8 @@ export async function syncInspectionVideos(inspectionId: string): Promise<{ erro
   if (!inspection?.source_video_drive_folder_url) {
     return { error: 'This inspection has no Google Drive video folder linked.' }
   }
+  const guidedBlock = await guidedInspectionBlockReason(inspectionId)
+  if (guidedBlock) return { error: guidedBlock }
 
   const folderId = parseFolderIdFromUrl(inspection.source_video_drive_folder_url)
   if (!folderId) {
@@ -1334,6 +1409,25 @@ export async function syncInspectionVideos(inspectionId: string): Promise<{ erro
   return { videos }
 }
 
+// Guided Inspection gate (System Config > Guided Inspection): when the
+// master switch AND this inspection's type are both on, videos can't be
+// processed until the inspector has marked the field steps complete -- the
+// room list has to exist before the AI runs, or it can't use it. Returns the
+// message to show, or null when processing may go ahead.
+async function guidedInspectionBlockReason(inspectionId: string): Promise<string | null> {
+  const sql = getSql()
+  const [row] = await sql`
+    select s.guided_inspection_required as master_on, t.guided_inspection_required as type_on,
+           i.field_completed_at, i.inspection_type
+    from inspections i
+    left join inspection_types t on t.name = i.inspection_type
+    cross join settings s
+    where i.id = ${inspectionId}
+  `
+  if (!row || !isGuidedInspectionRequired(!!row.master_on, !!row.type_on) || row.field_completed_at) return null
+  return `Guided Inspection is required for ${row.inspection_type} inspections. The inspector needs to finish the field steps (rooms, checklist, room photos) and mark them complete on the iPad before the videos can be processed.`
+}
+
 type VideoForProcessing = { id: string; drive_file_id: string; filename: string; size_bytes: string | null; status: string }
 
 // Rooms already named in this inspection's earlier (recording-order)
@@ -1347,11 +1441,16 @@ async function buildSegmentContext(
   inspectionId: string,
   sortedVideos: VideoForProcessing[],
   currentVideoId: string,
-): Promise<{ roomsSoFar: string[]; previousLastRoom: string | null }> {
+): Promise<{ plannedRooms: string[]; roomsSoFar: string[]; previousLastRoom: string | null }> {
   const sql = getSql()
+  // Guided Inspection room list (docs/designs/propinspec-guided-inspection.md):
+  // when the inspector set the rooms up front, those are the required names.
+  const plannedRooms = (
+    await sql`select room_name from inspection_room_plan where inspection_id = ${inspectionId} order by sort_order, created_at`
+  ).map((r) => String(r.room_name))
   const index = sortedVideos.findIndex((v) => v.id === currentVideoId)
   const earlier = sortedVideos.slice(0, Math.max(0, index)).filter((v) => v.status === 'done')
-  if (earlier.length === 0) return { roomsSoFar: [], previousLastRoom: null }
+  if (earlier.length === 0) return { plannedRooms, roomsSoFar: [], previousLastRoom: null }
 
   const rows = await sql`
     select room_area from line_items
@@ -1369,7 +1468,7 @@ async function buildSegmentContext(
       spans.map((r) => ({ room_area: r.room_area, start_seconds: Number(r.start_seconds), end_seconds: Number(r.end_seconds) })),
     )
   }
-  return { roomsSoFar, previousLastRoom }
+  return { plannedRooms, roomsSoFar, previousLastRoom }
 }
 
 // Stores the segment's measurements and room spans, then cuts and uploads
@@ -1481,7 +1580,9 @@ export async function processNextInspectionVideo(inspectionId: string): Promise<
     select id, drive_file_id, filename, size_bytes, status from inspection_videos
     where inspection_id = ${inspectionId}
   `) as unknown as VideoForProcessing[]).sort((a, b) => compareVideoFilenames(a.filename, b.filename))
-  const next = allVideos.find((v) => v.status === 'pending')
+  // Backstop for a direct call -- the normal path is already stopped at
+  // syncInspectionVideos, which shows the office the same reason.
+  const next = (await guidedInspectionBlockReason(inspectionId)) ? undefined : allVideos.find((v) => v.status === 'pending')
 
   if (next) {
     // Pre-flight size check (plan-eng-review, 2026-09-24) -- rejects before
@@ -1621,99 +1722,6 @@ export async function retryInspectionVideo(videoRowId: string, inspectionId: str
   return { videos }
 }
 
-// "Share Images" (Image Folder page): called directly from a client
-// component's onClick, not a <form> -- the client needs the resulting URL
-// back immediately to copy it to the clipboard, which a form action's void
-// return can't do. Takes a plain array, not FormData, same as
-// updateLineItemSchedule above. `images` is a snapshot, not a set of
-// line_item ids, so the resulting link keeps working even if those line
-// items are later edited or removed -- see migration 0025.
-export async function createImageShareLink(
-  inspectionId: string,
-  images: { url: string; roomArea: string; item: string }[]
-): Promise<{ url?: string; error?: string }> {
-  await requireSessionOrThrow()
-  if (images.length === 0) return { error: 'Select at least one image first.' }
-  const sql = getSql()
-  const token = randomUUID()
-  await sql`
-    insert into image_share_links (inspection_id, token, images)
-    values (${inspectionId}, ${token}, ${sql.json(images)})
-  `
-  return { url: `/share/${token}` }
-}
-
-// AI help widget (docs/designs/ai-help-widget.md) -- called directly from
-// HelpWidget.tsx's onClick, not a form, same reasoning as createImageShareLink
-// above. `pathname` drives lib/helpContext.ts's route match so the assistant
-// can answer "why does this show X" using the real data on the reviewer's
-// current screen, not just static workflow help.
-export async function askHelp(
-  pathname: string,
-  question: string,
-  history: HelpMessage[]
-): Promise<{ answer?: string; error?: string }> {
-  try {
-    await requireSessionOrThrow()
-    const pageData = await getPageContext(pathname)
-    const answer = await askHelpAssistant(question, history, pageData)
-    return { answer }
-  } catch (err) {
-    return { error: (err as Error).message || 'Something went wrong asking the assistant.' }
-  }
-}
-
-// Manage Users (Setup, Admin-only). Called directly from CreateUserForm.tsx
-// (useTransition), not a plain form action, so a duplicate-email/
-// short-password rejection can be shown inline instead of silently no-oping
-// the way createVendor/createStage do.
-export async function createUser(email: string, role: string): Promise<{ error?: string }> {
-  await requireAdminOrThrow()
-  const sql = getSql()
-  const normalizedEmail = email.trim().toLowerCase()
-  if (!normalizedEmail || !normalizedEmail.includes('@')) {
-    return { error: 'Enter a valid email address.' }
-  }
-  if (role !== 'Admin' && role !== 'General User') {
-    return { error: 'Invalid access level.' }
-  }
-
-  // Random temp password, never chosen by the admin -- the new user only
-  // ever learns it via the email below. Sent BEFORE the insert (plan-eng-review,
-  // 2026-09-29, D2): if the email fails, nothing is created, rather than a
-  // real account existing that its owner can never learn the password to.
-  const tempPassword = randomBytes(12).toString('base64url')
-  try {
-    await sendTempPasswordEmail(normalizedEmail, tempPassword)
-  } catch {
-    return { error: 'Could not send the account email. No account was created -- try again.' }
-  }
-
-  const passwordHash = await bcrypt.hash(tempPassword, 12)
-
-  try {
-    await sql`
-      insert into users (email, password_hash, role, must_change_password)
-      values (${normalizedEmail}, ${passwordHash}, ${role}, true)
-    `
-  } catch (err) {
-    const pgError = err as { code?: string }
-    if (pgError.code === '23505') {
-      return { error: 'A user with that email already exists.' }
-    }
-    return { error: 'Something went wrong creating the user.' }
-  }
-
-  revalidatePath('/setup/users')
-  return {}
-}
-
-export async function deleteUser(userId: string) {
-  await requireAdminOrThrow()
-  const sql = getSql()
-  await sql`delete from users where id = ${userId}`
-  revalidatePath('/setup/users')
-}
 // In-app "Split video" for a video rejected as too large (2026-10-01) --
 // replaces copying `node scripts/split-video.mjs <id>` into a terminal.
 // Cuts ONE ~3-minute part per call straight from Drive to Drive (see
@@ -1789,3 +1797,119 @@ function allUploadsConfirmed(parts: { fileId: string }[]): boolean {
   return parts.length > 0 && parts.every((p) => typeof p.fileId === 'string' && p.fileId.length > 0)
 }
 
+// "Share Images" (Image Folder page): called directly from a client
+// component's onClick, not a <form> -- the client needs the resulting URL
+// back immediately to copy it to the clipboard, which a form action's void
+// return can't do. Takes a plain array, not FormData, same as
+// updateLineItemSchedule above. `images` is a snapshot, not a set of
+// line_item ids, so the resulting link keeps working even if those line
+// items are later edited or removed -- see migration 0025.
+export async function createImageShareLink(
+  inspectionId: string,
+  images: { url: string; roomArea: string; item: string }[]
+): Promise<{ url?: string; error?: string }> {
+  await requireSessionOrThrow()
+  if (images.length === 0) return { error: 'Select at least one image first.' }
+  const sql = getSql()
+  const token = randomUUID()
+  await sql`
+    insert into image_share_links (inspection_id, token, images)
+    values (${inspectionId}, ${token}, ${sql.json(images)})
+  `
+  return { url: `/share/${token}` }
+}
+
+// AI help widget (docs/designs/ai-help-widget.md) -- called directly from
+// HelpWidget.tsx's onClick, not a form, same reasoning as createImageShareLink
+// above. `pathname` drives lib/helpContext.ts's route match so the assistant
+// can answer "why does this show X" using the real data on the reviewer's
+// current screen, not just static workflow help.
+export async function askHelp(
+  pathname: string,
+  question: string,
+  history: HelpMessage[]
+): Promise<{ answer?: string; error?: string }> {
+  try {
+    await requireSessionOrThrow()
+    const pageData = await getPageContext(pathname)
+    const answer = await askHelpAssistant(question, history, pageData)
+    return { answer }
+  } catch (err) {
+    return { error: (err as Error).message || 'Something went wrong asking the assistant.' }
+  }
+}
+
+// Manage Users (Setup, Admin-only). Called directly from CreateUserForm.tsx
+// (useTransition), not a plain form action, so a duplicate-email/
+// short-password rejection can be shown inline instead of silently no-oping
+// the way createVendor/createStage do.
+//
+// Inspector (Guided Inspection field accounts) must be linked to an
+// inspectors row -- that link is what decides which inspections the account
+// can see in /field (lib/dal.ts). Checked before the email is sent, so a
+// bad link never leaves a half-created account.
+export async function createUser(email: string, role: string, inspectorId?: string | null): Promise<{ error?: string }> {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  const normalizedEmail = email.trim().toLowerCase()
+  if (!normalizedEmail || !normalizedEmail.includes('@')) {
+    return { error: 'Enter a valid email address.' }
+  }
+  if (role !== 'Admin' && role !== 'General User' && role !== 'Inspector') {
+    return { error: 'Invalid access level.' }
+  }
+  let linkedInspectorId: string | null = null
+  if (role === 'Inspector') {
+    const [inspector] = inspectorId ? await sql`select id from inspectors where id = ${inspectorId}` : []
+    if (!inspector) return { error: 'Pick which inspector this login belongs to.' }
+    linkedInspectorId = inspector.id
+  }
+
+  // Random temp password, never chosen by the admin -- the new user only
+  // ever learns it via the email below. Sent BEFORE the insert (plan-eng-review,
+  // 2026-09-29, D2): if the email fails, nothing is created, rather than a
+  // real account existing that its owner can never learn the password to.
+  const tempPassword = randomBytes(12).toString('base64url')
+  try {
+    await sendTempPasswordEmail(normalizedEmail, tempPassword)
+  } catch {
+    return { error: 'Could not send the account email. No account was created -- try again.' }
+  }
+
+  const passwordHash = await bcrypt.hash(tempPassword, 12)
+
+  try {
+    await sql`
+      insert into users (email, password_hash, role, must_change_password, inspector_id)
+      values (${normalizedEmail}, ${passwordHash}, ${role}, true, ${linkedInspectorId})
+    `
+  } catch (err) {
+    const pgError = err as { code?: string }
+    if (pgError.code === '23505') {
+      return { error: 'A user with that email already exists.' }
+    }
+    return { error: 'Something went wrong creating the user.' }
+  }
+
+  revalidatePath('/setup/users')
+  return {}
+}
+
+// Re-links an existing Inspector login to a different inspector (or fixes
+// one created before its inspector existed in the catalog).
+export async function setUserInspector(userId: string, formData: FormData) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  const inspectorId = String(formData.get('inspector_id') ?? '')
+  const [inspector] = inspectorId ? await sql`select id from inspectors where id = ${inspectorId}` : []
+  if (!inspector) return
+  await sql`update users set inspector_id = ${inspector.id} where id = ${userId} and role = 'Inspector'`
+  revalidatePath('/setup/users')
+}
+
+export async function deleteUser(userId: string) {
+  await requireAdminOrThrow()
+  const sql = getSql()
+  await sql`delete from users where id = ${userId}`
+  revalidatePath('/setup/users')
+}

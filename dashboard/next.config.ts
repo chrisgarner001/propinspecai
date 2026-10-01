@@ -30,6 +30,15 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/**": ["./node_modules/ffmpeg-static/**"],
   },
+  // Guided Inspection photo uploads go through Server Actions (app/field/
+  // actions.ts). The browser resizes each photo first (typically 300-800KB),
+  // but the 1MB default leaves too little margin; 4mb stays under Vercel's
+  // own ~4.5MB request-body ceiling. lib/fieldPhotos.ts enforces the same cap.
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "4mb",
+    },
+  },
 };
 
 export default nextConfig;

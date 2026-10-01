@@ -136,14 +136,30 @@ Return one entry per distinct inspected item/finding via the structured schema. 
 // no way to know which room it is (9355 Sylvia: the second half of Bedroom 3
 // came back as just "Bedroom").
 export type SegmentContext = {
+  // Guided Inspection: the room list the inspector set on the iPad before
+  // recording (docs/designs/propinspec-guided-inspection.md). When present,
+  // it's the required naming, not just a hint.
+  plannedRooms?: string[]
   roomsSoFar: string[]
   previousLastRoom: string | null
 }
 
 function contextBlock(ctx: SegmentContext | undefined): string {
-  if (!ctx || (ctx.roomsSoFar.length === 0 && !ctx.previousLastRoom)) return ''
-  const lines = ['', '## Earlier in this same inspection', '', 'This video is a continuation of the same walkthrough as earlier videos of this property.']
-  if (ctx.roomsSoFar.length > 0) {
+  const planned = ctx?.plannedRooms ?? []
+  if (!ctx || (planned.length === 0 && ctx.roomsSoFar.length === 0 && !ctx.previousLastRoom)) return ''
+  const lines: string[] = []
+  if (planned.length > 0) {
+    lines.push(
+      '',
+      "## This property's rooms (set by the inspector before recording)",
+      '',
+      `The inspector listed these rooms on site: ${planned.join(', ')}.`,
+      'For every room_area in line_items, room_measurements, and room_segments, use exactly one of these names, spelled exactly as listed. The inspector names each room aloud as they enter it -- match what they say to this list. Only use a different name for an area that is genuinely not on the list.',
+    )
+  }
+  if (ctx.roomsSoFar.length === 0 && !ctx.previousLastRoom) return lines.join('\n')
+  lines.push('', '## Earlier in this same inspection', '', 'This video is a continuation of the same walkthrough as earlier videos of this property.')
+  if (ctx.roomsSoFar.length > 0 && planned.length === 0) {
     lines.push(`Rooms already identified in earlier videos (reuse these exact names for the same rooms): ${ctx.roomsSoFar.join(', ')}.`)
   }
   if (ctx.previousLastRoom) {

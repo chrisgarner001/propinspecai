@@ -28,6 +28,11 @@ const SECTIONS = [
     description: 'The catalog behind the Inspection Type picker on Add New Inspection (Move-Out, Move-In, and any others added).',
   },
   {
+    href: '/setup/guided-inspection',
+    title: 'Guided Inspection',
+    description: 'The iPad field steps: whether they are required (overall and per inspection type), and the checklist items inspectors capture.',
+  },
+  {
     href: '/setup/inspectors',
     title: 'Inspectors',
     description: 'The catalog behind the Inspector dropdown on Add New Inspection.',
@@ -40,7 +45,7 @@ const SECTIONS = [
   {
     href: '/setup/users',
     title: 'Users',
-    description: 'Dashboard accounts and their access level (Admin / General User).',
+    description: 'Dashboard accounts and their access level (Admin / General User / Inspector).',
   },
   {
     href: '/cost-book',

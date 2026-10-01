@@ -1,5 +1,5 @@
 import { getSql } from '@/lib/db'
-import { verifySession } from '@/lib/dal'
+import { verifySession, isOfficeSession } from '@/lib/dal'
 import { NextResponse } from 'next/server'
 import PDFDocument from 'pdfkit'
 import path from 'node:path'
@@ -32,7 +32,7 @@ const CONTENT_BOTTOM = PAGE_HEIGHT - PAGE_MARGIN
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await verifySession()
-  if (!session) return new NextResponse(null, { status: 401 })
+  if (!isOfficeSession(session)) return new NextResponse(null, { status: 401 })
   const { id } = await params
   const sql = getSql()
 

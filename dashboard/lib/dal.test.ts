@@ -113,3 +113,52 @@ describe('requireSessionOrThrow / requireAdminOrThrow -- block must-change-passw
     expect(session?.mustChangePassword).toBe(true)
   })
 })
+
+// Guided Inspection (docs/designs/propinspec-guided-inspection.md): an
+// Inspector (field iPad) account is rejected by every existing page, action,
+// and report route by default -- only code that opts in with allowInspector
+// (the field view, /change-password) lets it through.
+describe('Inspector role is office-locked by default', () => {
+  const inspector = { id: 'u1', email: 'chuck@example.com', role: 'Inspector', must_change_password: false }
+
+  it('requireSession redirects an Inspector to /field', async () => {
+    cookieValue = 'valid-token'
+    userRow = inspector
+    const { requireSession } = await import('./dal')
+    await expect(requireSession()).rejects.toThrow('REDIRECT:/field')
+  })
+
+  it('requireSession lets an Inspector through only with allowInspector', async () => {
+    cookieValue = 'valid-token'
+    userRow = inspector
+    const { requireSession } = await import('./dal')
+    const session = await requireSession({ allowInspector: true })
+    expect(session.role).toBe('Inspector')
+  })
+
+  it('a must-change-password Inspector is still sent to /change-password first', async () => {
+    cookieValue = 'valid-token'
+    userRow = { ...inspector, must_change_password: true }
+    const { requireSession } = await import('./dal')
+    await expect(requireSession()).rejects.toThrow('REDIRECT:/change-password')
+  })
+
+  it('requireSessionOrThrow and requireAdminOrThrow reject an Inspector', async () => {
+    cookieValue = 'valid-token'
+    userRow = inspector
+    const { requireSessionOrThrow, requireAdminOrThrow } = await import('./dal')
+    await expect(requireSessionOrThrow()).rejects.toThrow('Not authorized')
+    await expect(requireAdminOrThrow()).rejects.toThrow('Not authorized')
+    await expect(requireSessionOrThrow({ allowInspector: true })).resolves.toMatchObject({ role: 'Inspector' })
+  })
+
+  it('isOfficeSession (report/PDF routes) rejects Inspector and must-change-password sessions', async () => {
+    const { isOfficeSession } = await import('./dal')
+    const base = { userId: 'u1', email: 'a@example.com', mustChangePassword: false }
+    expect(isOfficeSession({ ...base, role: 'General User' })).toBe(true)
+    expect(isOfficeSession({ ...base, role: 'Admin' })).toBe(true)
+    expect(isOfficeSession({ ...base, role: 'Inspector' })).toBe(false)
+    expect(isOfficeSession({ ...base, role: 'General User', mustChangePassword: true })).toBe(false)
+    expect(isOfficeSession(null)).toBe(false)
+  })
+})

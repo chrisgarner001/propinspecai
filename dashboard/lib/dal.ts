@@ -42,10 +42,16 @@ export const verifySession = cache(async (): Promise<Session | null> => {
 // null, since a page has no other way to reject an unauthenticated render.
 // skipPasswordCheck is set only by /change-password itself, to avoid
 // redirecting that page to itself.
-export async function requireSession(opts?: { skipPasswordCheck?: boolean }): Promise<Session> {
+//
+// Inspector accounts (field iPads, docs/designs/propinspec-guided-inspection.md)
+// are rejected here by default and sent to /field -- every existing office
+// page stays office-only without each one opting out. Only the field pages
+// (via requireFieldAccess below) and /change-password pass allowInspector.
+export async function requireSession(opts?: { skipPasswordCheck?: boolean; allowInspector?: boolean }): Promise<Session> {
   const session = await verifySession()
   if (!session) redirect('/login')
   if (session.mustChangePassword && !opts?.skipPasswordCheck) redirect('/change-password')
+  if (session.role === 'Inspector' && !opts?.allowInspector) redirect('/field')
   return session
 }
 
@@ -72,11 +78,71 @@ export async function requireAdmin(): Promise<Session> {
 // rejected instead, so a must-change-password session can't be used to
 // mutate data by replaying/calling an action directly, bypassing the page
 // redirect above (plan-eng-review, 2026-09-29, D4).
-export async function requireSessionOrThrow(): Promise<Session> {
+//
+// Same Inspector default as requireSession: every existing Server Action
+// rejects a field account unless it explicitly opts in (only the field
+// actions do, via requireFieldAccessOrThrow).
+export async function requireSessionOrThrow(opts?: { allowInspector?: boolean }): Promise<Session> {
   const session = await verifySession()
   if (!session) throw new Error('Not authenticated')
   if (session.mustChangePassword) throw new Error('Password change required')
+  if (session.role === 'Inspector' && !opts?.allowInspector) throw new Error('Not authorized')
   return session
+}
+
+// For the report/PDF Route Handlers, which call verifySession() directly
+// (they return a 401 Response rather than throwing) -- an Inspector session
+// is valid, but not for office data like quotes and tenant charges.
+export function isOfficeSession(session: Session | null): session is Session {
+  return !!session && !session.mustChangePassword && session.role !== 'Inspector'
+}
+
+export type FieldInspection = {
+  id: string
+  property_address: string
+  job_number: string
+  inspection_date: string
+  inspector_name: string
+  inspection_type: string
+  source_video_drive_folder_url: string | null
+  field_completed_at: string | null
+}
+
+// Field view access: Admin and General User may open any inspection's field
+// view; an Inspector only inspections assigned to the inspector their
+// account is linked to (users.inspector_id -> inspectors.name, matched
+// against inspections.inspector_name). Returns null when the inspection
+// doesn't exist OR isn't theirs -- callers don't distinguish, so an
+// Inspector can't probe for other inspections' ids.
+async function loadFieldInspection(session: Session, inspectionId: string): Promise<FieldInspection | null> {
+  const sql = getSql()
+  const [row] = await sql`
+    select i.id, i.property_address, i.job_number, i.inspection_date, i.inspector_name, i.inspection_type,
+           i.source_video_drive_folder_url, i.field_completed_at
+    from inspections i
+    where i.id = ${inspectionId}
+      and (
+        ${session.role !== 'Inspector'}
+        or i.inspector_name = (select n.name from users u join inspectors n on n.id = u.inspector_id where u.id = ${session.userId})
+      )
+  `
+  return (row as FieldInspection | undefined) ?? null
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export async function requireFieldAccess(inspectionId: string): Promise<{ session: Session; inspection: FieldInspection }> {
+  const session = await requireSession({ allowInspector: true })
+  const inspection = UUID_RE.test(inspectionId) ? await loadFieldInspection(session, inspectionId) : null
+  if (!inspection) redirect('/field')
+  return { session, inspection }
+}
+
+export async function requireFieldAccessOrThrow(inspectionId: string): Promise<{ session: Session; inspection: FieldInspection }> {
+  const session = await requireSessionOrThrow({ allowInspector: true })
+  const inspection = UUID_RE.test(inspectionId) ? await loadFieldInspection(session, inspectionId) : null
+  if (!inspection) throw new Error('Not authorized')
+  return { session, inspection }
 }
 
 export async function requireAdminOrThrow(): Promise<Session> {
