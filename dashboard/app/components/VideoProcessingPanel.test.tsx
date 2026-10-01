@@ -5,10 +5,9 @@ import userEvent from '@testing-library/user-event'
 import VideoProcessingPanel from './VideoProcessingPanel'
 import type { InspectionVideoRow } from '@/app/actions'
 
-// Regression coverage for the "Copy split command" button (plan-eng-review,
-// 2026-09-28): the first component test in this codebase, added specifically
-// because this button's three failure modes (wrong rows, wrong command,
-// silent clipboard failure) had zero test coverage otherwise.
+// The first component test in this codebase (plan-eng-review, 2026-09-28),
+// originally for the "Copy split command" button; now covers its in-app
+// replacement, "Split video", and the stuck-"Checking…" regression.
 //
 // app/actions.ts is a real 'use server' module that transitively imports
 // lib/dal.ts's `server-only` marker, DB and Google clients -- none of which
@@ -23,6 +22,7 @@ vi.mock('@/app/actions', () => ({
   syncInspectionVideos: vi.fn(),
   processNextInspectionVideo: vi.fn(),
   retryInspectionVideo: vi.fn(),
+  splitNextVideoPart: vi.fn(),
 }))
 
 const sizeRejectedVideo: InspectionVideoRow = {
@@ -42,66 +42,64 @@ const otherFailureVideo: InspectionVideoRow = {
   line_items_created: 0,
 }
 
-// jsdom defines navigator.clipboard as non-writable (getter-only, when
-// defined at all) -- Object.assign silently fails to override it, so the
-// property needs to be redefined outright.
-function stubClipboard(writeText: ReturnType<typeof vi.fn>) {
-  Object.defineProperty(navigator, 'clipboard', {
-    value: { writeText },
-    configurable: true,
-    writable: true,
-  })
-}
-
 afterEach(() => {
   cleanup()
-  vi.restoreAllMocks()
+  vi.resetAllMocks()
 })
 
-describe('VideoProcessingPanel "Copy split command" button', () => {
-  it('renders only on a row whose error_message matches the size-rejection marker', async () => {
+// In-app "Split video" (2026-10-01) replaced "Copy split command", which only
+// copied a terminal command and ran nothing.
+describe('VideoProcessingPanel "Split video" button', () => {
+  it('renders only on a row rejected for size, not other failures', async () => {
     const user = userEvent.setup()
     render(<VideoProcessingPanel inspectionId="insp-1" initialVideos={[sizeRejectedVideo, otherFailureVideo]} />)
     await user.click(screen.getByText('Video Processing'))
-
-    const copyButtons = screen.getAllByText('Copy split command')
-    expect(copyButtons).toHaveLength(1)
-  })
-
-  it('does not render for a video failed for a different reason', async () => {
-    const user = userEvent.setup()
-    render(<VideoProcessingPanel inspectionId="insp-1" initialVideos={[otherFailureVideo]} />)
-    await user.click(screen.getByText('Video Processing'))
-
+    expect(screen.getAllByRole('button', { name: 'Split video' })).toHaveLength(1)
     expect(screen.queryByText('Copy split command')).not.toBeInTheDocument()
   })
 
-  it('copies the exact command with the real row id, and shows "Copied!" feedback', async () => {
-    // userEvent.setup() installs its own navigator.clipboard stub -- stub
-    // AFTER setup() so this test's spy wins, not the other way around.
-    const user = userEvent.setup()
-    const writeText = vi.fn().mockResolvedValue(undefined)
-    stubClipboard(writeText)
+  it('splits part by part with visible progress, then syncs and processes the parts', async () => {
+    const actions = await import('@/app/actions')
+    let releasePart2: () => void = () => {}
+    vi.mocked(actions.splitNextVideoPart)
+      .mockResolvedValueOnce({ done: false, partsDone: 1, partsTotal: 3 })
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (releasePart2 = () => resolve({ done: false, partsDone: 2, partsTotal: 3 }))),
+      )
+      .mockResolvedValueOnce({ done: true, partsDone: 3, partsTotal: 3 })
+    vi.mocked(actions.syncInspectionVideos).mockResolvedValueOnce({ videos: [] })
+    vi.mocked(actions.processNextInspectionVideo).mockResolvedValueOnce({ done: true, videos: [] })
 
+    const user = userEvent.setup()
     render(<VideoProcessingPanel inspectionId="insp-1" initialVideos={[sizeRejectedVideo]} />)
     await user.click(screen.getByText('Video Processing'))
-    await user.click(screen.getByText('Copy split command'))
+    await user.click(screen.getByRole('button', { name: 'Split video' }))
 
-    expect(writeText).toHaveBeenCalledWith('node scripts/split-video.mjs row-1')
-    expect(await screen.findByText('Copied!')).toBeInTheDocument()
+    expect(await screen.findByText('Splitting… part 2 of 3')).toBeInTheDocument()
+    releasePart2()
+
+    await vi.waitFor(() => expect(actions.syncInspectionVideos).toHaveBeenCalledWith('insp-1'))
+    expect(actions.splitNextVideoPart).toHaveBeenCalledTimes(3)
+    expect(actions.splitNextVideoPart).toHaveBeenCalledWith('row-1', 'insp-1')
   })
 
-  it('shows a visible fallback text field when the clipboard write is rejected', async () => {
-    const user = userEvent.setup()
-    const writeText = vi.fn().mockRejectedValue(new Error('denied'))
-    stubClipboard(writeText)
+  it('stops with a resumable message when a part fails, without syncing', async () => {
+    const actions = await import('@/app/actions')
+    vi.mocked(actions.splitNextVideoPart).mockResolvedValueOnce({
+      done: false,
+      partsDone: 1,
+      partsTotal: 3,
+      error: 'Part 2 failed: ffmpeg exited 1',
+    })
 
+    const user = userEvent.setup()
     render(<VideoProcessingPanel inspectionId="insp-1" initialVideos={[sizeRejectedVideo]} />)
     await user.click(screen.getByText('Video Processing'))
-    await user.click(screen.getByText('Copy split command'))
+    await user.click(screen.getByRole('button', { name: 'Split video' }))
 
-    const fallbackInput = await screen.findByDisplayValue('node scripts/split-video.mjs row-1')
-    expect(fallbackInput).toBeInTheDocument()
+    expect(await screen.findByText(/Splitting stopped: Part 2 failed: ffmpeg exited 1.*resume/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Split video' })).toBeEnabled()
+    expect(actions.syncInspectionVideos).not.toHaveBeenCalled()
   })
 })
 

@@ -10,8 +10,10 @@ import {
   ensureSubfolder,
   uploadVideoToFolder,
   trashDriveFile,
+  findFilesByName,
   ROOM_CLIPS_FOLDER_NAME,
 } from '@/lib/google'
+import { probeDriveVideoSeconds, cutDriveVideoPartToStream, splitPartCount, splitPartName, SPLIT_SEGMENT_SECONDS } from '@/lib/videoSplit'
 import { extractInspectionFromVideo, type ExtractedInspection } from '@/lib/gemini'
 import { parseTimestampSeconds, extractFrame, uploadStill, getVideoCreationTime, cutClip, cutClipToStream, hasTmpSpaceFor } from '@/lib/stills'
 import { compareVideoFilenames, continueRoomLabelAcrossSeam, toClipSpans, lastRoomOf, formatSeconds } from '@/lib/rooms'
@@ -1259,7 +1261,7 @@ const MAX_VIDEO_SIZE_BYTES = 480 * 1024 * 1024 // ~480MB
 // 2026-09-28 -- the 400->480MB bump already had to touch multiple copies).
 function sizeRejectionMessage(sizeBytes: number): string {
   const mb = Math.round(sizeBytes / 1024 / 1024)
-  return `This video is ${SIZE_REJECTION_MARKER} (${mb}MB) to process -- the server can safely handle up to ~480MB. Please re-shoot, split it into shorter clips, or ask an admin to run the split script.`
+  return `This video is ${SIZE_REJECTION_MARKER} (${mb}MB) to process -- the server can safely handle up to ~480MB in one piece. Click "Split video" to cut it into 3-minute parts, which are then processed automatically.`
 }
 
 // Lists the video files in the inspection's linked Drive folder and adds any
@@ -1712,3 +1714,78 @@ export async function deleteUser(userId: string) {
   await sql`delete from users where id = ${userId}`
   revalidatePath('/setup/users')
 }
+// In-app "Split video" for a video rejected as too large (2026-10-01) --
+// replaces copying `node scripts/split-video.mjs <id>` into a terminal.
+// Cuts ONE ~3-minute part per call straight from Drive to Drive (see
+// lib/videoSplit.ts for why that needs no local disk), so the panel can
+// loop and show progress, and each request stays well inside maxDuration.
+// Same end state as the script: every part uploaded to the inspection's
+// folder as `<name>-partN.mp4`, then the original trashed and its row
+// deleted, so "Check for new videos" picks the parts up as normal videos.
+//
+// Resumable: progress lives on the row (split_parts_total / split_parts),
+// and a part a killed request half-uploaded is trashed by name before the
+// re-upload, so retrying never leaves a duplicate part to be processed twice.
+export async function splitNextVideoPart(
+  videoRowId: string,
+  inspectionId: string,
+): Promise<{ done: boolean; partsDone: number; partsTotal: number; error?: string }> {
+  await requireSessionOrThrow()
+  const sql = getSql()
+  const [row] = await sql`
+    select v.id, v.drive_file_id, v.filename, v.status, v.error_message, v.split_parts_total, v.split_parts,
+           i.source_video_drive_folder_url
+    from inspection_videos v join inspections i on i.id = v.inspection_id
+    where v.id = ${videoRowId} and v.inspection_id = ${inspectionId}
+  `
+  // Already finished by an earlier call (row deleted once every part is up).
+  if (!row) return { done: true, partsDone: 0, partsTotal: 0 }
+  // Same guard as the script: only ever split a size rejection.
+  if (row.status !== 'failed' || !String(row.error_message ?? '').includes(SIZE_REJECTION_MARKER)) {
+    return { done: false, partsDone: 0, partsTotal: 0, error: 'Only a video rejected as too large can be split.' }
+  }
+  const folderId = row.source_video_drive_folder_url ? parseFolderIdFromUrl(row.source_video_drive_folder_url) : null
+  if (!folderId) return { done: false, partsDone: 0, partsTotal: 0, error: 'This inspection has no Drive folder linked.' }
+
+  let partsTotal: number = row.split_parts_total
+  if (!partsTotal) {
+    partsTotal = splitPartCount(await probeDriveVideoSeconds(row.drive_file_id))
+    await sql`update inspection_videos set split_parts_total = ${partsTotal} where id = ${row.id}`
+  }
+  const parts = (row.split_parts ?? []) as { fileId: string; name: string }[]
+
+  if (parts.length < partsTotal) {
+    const index = parts.length
+    const name = splitPartName(row.filename, index)
+    for (const leftover of await findFilesByName(folderId, name)) {
+      await trashDriveFile(leftover)
+    }
+    const { stream, done } = await cutDriveVideoPartToStream(row.drive_file_id, index * SPLIT_SEGMENT_SECONDS, SPLIT_SEGMENT_SECONDS)
+    const [upload, cut] = await Promise.allSettled([uploadVideoToFolder(stream, name, folderId), done])
+    if (cut.status === 'rejected' || upload.status === 'rejected') {
+      if (upload.status === 'fulfilled') await trashDriveFile(upload.value).catch(() => {})
+      const reason = (cut.status === 'rejected' ? cut.reason : (upload as PromiseRejectedResult).reason) as Error
+      return { done: false, partsDone: index, partsTotal, error: `Part ${index + 1} failed: ${reason.message}` }
+    }
+    parts.push({ fileId: upload.value, name })
+    await sql`update inspection_videos set split_parts = ${sql.json(parts)} where id = ${row.id}`
+  }
+
+  if (parts.length < partsTotal) return { done: false, partsDone: parts.length, partsTotal }
+
+  // Every part confirmed (allUploadsConfirmed is the script's own guard on
+  // this exact step, kept identical). Trash, not delete: the service
+  // account's fileOrganizer role can trash but not permanently delete.
+  if (!allUploadsConfirmed(parts)) {
+    return { done: false, partsDone: parts.length, partsTotal, error: 'A part is missing its Drive id; the original was kept.' }
+  }
+  await trashDriveFile(row.drive_file_id)
+  await sql`delete from inspection_videos where id = ${row.id}`
+  revalidatePath(`/inspections/${inspectionId}`)
+  return { done: true, partsDone: parts.length, partsTotal }
+}
+
+function allUploadsConfirmed(parts: { fileId: string }[]): boolean {
+  return parts.length > 0 && parts.every((p) => typeof p.fileId === 'string' && p.fileId.length > 0)
+}
+

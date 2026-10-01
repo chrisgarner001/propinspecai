@@ -147,3 +147,28 @@ export async function trashDriveFile(fileId: string): Promise<void> {
   const drive = google.drive({ version: 'v3', auth: getGoogleAuth() })
   await drive.files.update({ fileId, requestBody: { trashed: true }, supportsAllDrives: true })
 }
+
+// A short-lived OAuth access token for the service account, for callers that
+// talk to the Drive API outside googleapis -- lib/videoSplit.ts hands it to
+// ffmpeg as an Authorization header so ffmpeg can read a video over HTTPS.
+export async function getDriveAccessToken(): Promise<string> {
+  const client = await getGoogleAuth().getClient()
+  const { token } = await client.getAccessToken()
+  if (!token) throw new Error('Could not get a Google access token for the service account.')
+  return token
+}
+
+// Files with exactly this name directly in a folder (not trashed). Used by
+// the in-app split to clear a half-finished part left by a killed request
+// before re-uploading it, so a retry never leaves a duplicate part behind.
+export async function findFilesByName(folderId: string, name: string): Promise<string[]> {
+  const drive = google.drive({ version: 'v3', auth: getGoogleAuth() })
+  const escaped = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+  const res = await drive.files.list({
+    q: `'${folderId}' in parents and name = '${escaped}' and trashed = false`,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+    fields: 'files(id)',
+  })
+  return (res.data.files ?? []).map((f) => f.id).filter((id): id is string => !!id)
+}

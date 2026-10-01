@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi, afterEach } from 'vitest
 import { getSql } from '@/lib/db'
 import { access, writeFile } from 'node:fs/promises'
 import { Readable } from 'node:stream'
-import { duplicateLineItem, updateLineItemSchedule, syncInspectionVideos, processNextInspectionVideo, retryInspectionVideo, createUser } from './actions'
+import { duplicateLineItem, updateLineItemSchedule, syncInspectionVideos, processNextInspectionVideo, retryInspectionVideo, createUser, splitNextVideoPart } from './actions'
 
 // revalidatePath relies on Next's request-scoped static-generation store,
 // which doesn't exist when actions are called directly from a test runner
@@ -69,6 +69,20 @@ vi.mock('@/lib/google', async (importOriginal) => {
     ensureSubfolder: (...args: unknown[]) => mockEnsureSubfolder(...args),
     uploadVideoToFolder: (...args: unknown[]) => mockUploadVideoToFolder(...args),
     trashDriveFile: (...args: unknown[]) => mockTrashDriveFile(...args),
+    findFilesByName: (...args: unknown[]) => mockFindFilesByName(...args),
+  }
+})
+const mockFindFilesByName = vi.fn(async (..._args: unknown[]): Promise<string[]> => [])
+// In-app split: the real ffmpeg-over-HTTPS calls are faked; the pure
+// part-count/naming helpers stay real.
+const mockProbeDriveVideoSeconds = vi.fn(async (..._args: unknown[]) => 400)
+const mockCutDriveVideoPartToStream = vi.fn(async (..._args: unknown[]) => ({ stream: Readable.from([]), done: Promise.resolve() }))
+vi.mock('@/lib/videoSplit', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/videoSplit')>()
+  return {
+    ...actual,
+    probeDriveVideoSeconds: (...args: unknown[]) => mockProbeDriveVideoSeconds(...args),
+    cutDriveVideoPartToStream: (...args: unknown[]) => mockCutDriveVideoPartToStream(...args),
   }
 })
 // Room clips (9355 Sylvia audit): Drive writes are mocked like the reads
@@ -563,7 +577,9 @@ describe('video processing pipeline', () => {
       mockHasTmpSpaceFor.mockResolvedValue(false)
       mockCutClipToStream
         .mockReturnValueOnce({ stream: Readable.from([]), done: Promise.resolve() })
-        .mockReturnValueOnce({ stream: Readable.from([]), done: Promise.reject(new Error('ffmpeg exited 1')) })
+        // Created lazily, inside the call: an eagerly-created rejected promise
+        // sits unhandled until the action awaits it, which vitest reports.
+        .mockImplementationOnce(() => ({ stream: Readable.from([]), done: Promise.reject(new Error('ffmpeg exited 1')) }))
       mockExtractLineItemsFromVideo.mockResolvedValue({
         line_items: [lineItem('Utility Room', '0:30')],
         room_measurements: [],
@@ -634,6 +650,92 @@ describe('video processing pipeline', () => {
       const [closet] = await sql`select room_area from room_measurements where inspection_id = ${roomsInspectionId} and what_measured = 'Closet'`
       expect(closet.room_area).toBe('Bedroom 3')
     })
+  })
+})
+
+describe('splitNextVideoPart (in-app Split video)', () => {
+  let splitInspectionId: string
+  beforeAll(async () => {
+    const [row] = await sql`
+      insert into inspections (job_number, property_address, inspection_date, inspector_name, source_video_drive_folder_url)
+      values ('VITEST', 'Vitest Split Test', '2026-01-01', 'Vitest', 'https://drive.google.com/drive/folders/split123')
+      returning id
+    `
+    splitInspectionId = row.id as string
+  })
+  afterAll(async () => {
+    await sql`delete from inspections where id = ${splitInspectionId}`
+  })
+
+  const insertOversized = async () => {
+    const [v] = await sql`
+      insert into inspection_videos (inspection_id, drive_file_id, filename, size_bytes, status, error_message)
+      values (${splitInspectionId}, ${`file-big-${Date.now()}`}, '20260928_153705.mp4', 642352191, 'failed',
+              'This video is too large (613MB) to process')
+      returning id, drive_file_id
+    `
+    return v as { id: string; drive_file_id: string }
+  }
+
+  it('uploads one named part per call, then trashes the original and removes its row', async () => {
+    mockUploadVideoToFolder.mockClear()
+    mockTrashDriveFile.mockClear()
+    mockFindFilesByName.mockResolvedValue([])
+    const video = await insertOversized()
+
+    const first = await splitNextVideoPart(video.id, splitInspectionId)
+    expect(first).toEqual({ done: false, partsDone: 1, partsTotal: 3 }) // 400s -> 3 parts of 180s
+    expect(mockCutDriveVideoPartToStream).toHaveBeenLastCalledWith(video.drive_file_id, 0, 180)
+    expect(mockTrashDriveFile).not.toHaveBeenCalled() // original untouched mid-split
+
+    await splitNextVideoPart(video.id, splitInspectionId)
+    expect(mockCutDriveVideoPartToStream).toHaveBeenLastCalledWith(video.drive_file_id, 180, 180)
+    const last = await splitNextVideoPart(video.id, splitInspectionId)
+    expect(last).toEqual({ done: true, partsDone: 3, partsTotal: 3 })
+
+    expect(mockUploadVideoToFolder.mock.calls.map((c) => [c[1], c[2]])).toEqual([
+      ['20260928_153705-part1.mp4', 'split123'],
+      ['20260928_153705-part2.mp4', 'split123'],
+      ['20260928_153705-part3.mp4', 'split123'],
+    ])
+    expect(mockTrashDriveFile).toHaveBeenCalledWith(video.drive_file_id)
+    const [gone] = await sql`select id from inspection_videos where id = ${video.id}`
+    expect(gone).toBeUndefined()
+  })
+
+  it('a failed part keeps the original, and the retry trashes the half-uploaded leftover and resumes', async () => {
+    mockUploadVideoToFolder.mockClear()
+    mockTrashDriveFile.mockClear()
+    const video = await insertOversized()
+    await splitNextVideoPart(video.id, splitInspectionId) // part 1 ok
+
+    mockCutDriveVideoPartToStream.mockImplementationOnce(async () => ({
+      stream: Readable.from([]),
+      done: Promise.reject(new Error('ffmpeg exited 1')),
+    }))
+    const failed = await splitNextVideoPart(video.id, splitInspectionId)
+    expect(failed.error).toMatch(/Part 2 failed: ffmpeg exited 1/)
+    expect(failed.partsDone).toBe(1)
+    // The truncated part-2 upload was trashed; the original was not.
+    expect(mockTrashDriveFile).toHaveBeenCalledWith('drive-20260928_153705-part2.mp4')
+    expect(mockTrashDriveFile).not.toHaveBeenCalledWith(video.drive_file_id)
+
+    mockFindFilesByName.mockResolvedValueOnce(['leftover-part2'])
+    const resumed = await splitNextVideoPart(video.id, splitInspectionId)
+    expect(resumed).toEqual({ done: false, partsDone: 2, partsTotal: 3 })
+    expect(mockFindFilesByName).toHaveBeenCalledWith('split123', '20260928_153705-part2.mp4')
+    expect(mockTrashDriveFile).toHaveBeenCalledWith('leftover-part2')
+  })
+
+  it('refuses to split a video that failed for any other reason', async () => {
+    const [v] = await sql`
+      insert into inspection_videos (inspection_id, drive_file_id, filename, size_bytes, status, error_message)
+      values (${splitInspectionId}, 'file-perm', 'perm.mp4', 1000, 'failed', 'Can''t access this Drive folder')
+      returning id
+    `
+    const result = await splitNextVideoPart(v.id, splitInspectionId)
+    expect(result.error).toMatch(/only a video rejected as too large/i)
+    expect(mockProbeDriveVideoSeconds).not.toHaveBeenCalledWith('file-perm')
   })
 })
 

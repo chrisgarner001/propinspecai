@@ -6,6 +6,7 @@ import {
   syncInspectionVideos,
   processNextInspectionVideo,
   retryInspectionVideo,
+  splitNextVideoPart,
   type InspectionVideoRow,
 } from '@/app/actions'
 import { SIZE_REJECTION_MARKER } from '@/lib/videoProcessing'
@@ -28,8 +29,7 @@ export default function VideoProcessingPanel({
   const [running, setRunning] = useState(false)
   const [bannerError, setBannerError] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState(true)
-  const [copiedId, setCopiedId] = useState<string | null>(null)
-  const [copyFallbackId, setCopyFallbackId] = useState<string | null>(null)
+  const [splitting, setSplitting] = useState<{ id: string; done: number; total: number } | null>(null)
   const [gateCheckBanner, setGateCheckBanner] = useState<string | null>(null)
   const router = useRouter()
 
@@ -88,10 +88,11 @@ export default function VideoProcessingPanel({
       const noun = oversized.length === 1 ? 'video' : 'videos'
       const verb = oversized.length === 1 ? 'is' : 'are'
       setGateCheckBanner(
-        `${oversized.length} of ${syncedVideos.length} ${noun} ${verb} too large to process automatically. ` +
-          `Use "Copy split command" below to split ${oversized.length === 1 ? 'it' : 'them'}, then click "Check for new videos" again.`
+        `${oversized.length} of ${syncedVideos.length} ${noun} ${verb} too large to process in one piece. ` +
+          `Click "Split video" next to ${oversized.length === 1 ? 'it' : 'each one'} below. PropInspec cuts it into ` +
+          `3-minute parts in the Drive folder and then processes the parts automatically.`
       )
-      setCollapsed(false) // so the banner's Copy split command buttons are visible without an extra click
+      setCollapsed(false) // so the Split video buttons are visible without an extra click
     }
 
     await runLoop()
@@ -109,17 +110,37 @@ export default function VideoProcessingPanel({
     await runLoop()
   }
 
-  // navigator.clipboard.writeText can reject (permissions policy, older
-  // browser, non-secure context) -- falls back to a visible, select-to-copy
-  // text field rather than failing silently (plan-eng-review, 2026-09-28).
-  async function handleCopySplitCommand(videoRowId: string) {
-    const command = `node scripts/split-video.mjs ${videoRowId}`
+  // Server-side split (app/actions.ts splitNextVideoPart): one ~3-minute
+  // part per call, looped here so progress shows after every part. When the
+  // last part is up, the original's row is gone and handleStart() syncs the
+  // new parts in and processes them -- no terminal, no extra click.
+  async function handleSplit(videoRowId: string) {
+    setBannerError(null)
+    setRunning(true)
+    setSplitting({ id: videoRowId, done: 0, total: 0 })
+    let finished = false
     try {
-      await navigator.clipboard.writeText(command)
-      setCopiedId(videoRowId)
-      setTimeout(() => setCopiedId((id) => (id === videoRowId ? null : id)), 2000)
-    } catch {
-      setCopyFallbackId(videoRowId)
+      while (true) {
+        const result = await splitNextVideoPart(videoRowId, inspectionId)
+        if (result.error) {
+          setBannerError(`Splitting stopped: ${result.error} Click "Split video" again to resume from where it stopped.`)
+          break
+        }
+        setSplitting({ id: videoRowId, done: result.partsDone, total: result.partsTotal })
+        if (result.done) {
+          finished = true
+          break
+        }
+      }
+    } catch (err) {
+      setBannerError(`Splitting stopped: ${(err as Error).message}. Click "Split video" again to resume from where it stopped.`)
+    } finally {
+      setSplitting(null)
+      setRunning(false)
+    }
+    if (finished) {
+      setGateCheckBanner(null)
+      await handleStart()
     }
   }
 
@@ -229,15 +250,23 @@ export default function VideoProcessingPanel({
                     handles this one case, running it against a different
                     kind of failure would be pointless (plan-eng-review,
                     2026-09-28). */}
-                {v.status === 'failed' && v.error_message?.includes(SIZE_REJECTION_MARKER) && (
-                  <button
-                    type="button"
-                    onClick={() => handleCopySplitCommand(v.id)}
-                    className="text-[11px] font-semibold text-accent hover:text-accent-hover"
-                  >
-                    {copiedId === v.id ? 'Copied!' : 'Copy split command'}
-                  </button>
-                )}
+                {v.status === 'failed' && v.error_message?.includes(SIZE_REJECTION_MARKER) &&
+                  (splitting?.id === v.id ? (
+                    <span className="text-[11px] font-semibold text-accent-ink whitespace-nowrap" role="status">
+                      {splitting.total > 0
+                        ? `Splitting… part ${Math.min(splitting.done + 1, splitting.total)} of ${splitting.total}`
+                        : 'Splitting… reading video'}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleSplit(v.id)}
+                      disabled={running}
+                      className="text-[11px] font-semibold text-accent hover:text-accent-hover disabled:opacity-50"
+                    >
+                      Split video
+                    </button>
+                  ))}
               </li>
             ))}
           </ul>
@@ -246,24 +275,6 @@ export default function VideoProcessingPanel({
             .map((v) => (
               <div key={`${v.id}-err`} className="text-[11px] text-error">
                 {v.filename}: {v.error_message}
-                {copyFallbackId === v.id && (
-                  <div className="mt-1 flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      readOnly
-                      value={`node scripts/split-video.mjs ${v.id}`}
-                      onFocus={(e) => e.target.select()}
-                      className="flex-1 min-w-0 border border-border rounded-[var(--radius-sm)] px-2 py-1 text-[11px] data-mono bg-surface text-text"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setCopyFallbackId(null)}
-                      className="text-[11px] font-semibold text-text-muted hover:text-text"
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                )}
               </div>
             ))}
         </div>
