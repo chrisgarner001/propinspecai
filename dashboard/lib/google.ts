@@ -24,8 +24,11 @@ export function getGoogleAuth() {
 }
 
 // "https://drive.google.com/drive/folders/10nhel1iO..." -> "10nhel1iO..."
+// Also accepts Drive for desktop's "Copy link" format
+// (https://drive.google.com/open?id=<id>&usp=drive_fs) -- 35852 Beverly's
+// link was that shape (2026-10-01) and couldn't be processed at all.
 export function parseFolderIdFromUrl(url: string): string | null {
-  const match = url.match(/folders\/([a-zA-Z0-9_-]+)/)
+  const match = url.match(/folders\/([a-zA-Z0-9_-]+)/) ?? url.match(/[?&]id=([a-zA-Z0-9_-]+)/)
   return match ? match[1] : null
 }
 

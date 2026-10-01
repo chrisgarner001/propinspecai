@@ -32,8 +32,11 @@ const execFileAsync = promisify(execFile)
 // Same regex as lib/google.ts's parseFolderIdFromUrl -- duplicated per the
 // established .mjs/.ts import-boundary convention (see upload-videos.mjs,
 // backfill-video-sizes.mjs).
+// Also accepts Drive for desktop's "Copy link" format
+// (https://drive.google.com/open?id=<id>&usp=drive_fs) -- 35852 Beverly's
+// link was that shape (2026-10-01) and couldn't be processed at all.
 export function parseFolderIdFromUrl(url) {
-  const match = url.match(/folders\/([a-zA-Z0-9_-]+)/)
+  const match = url.match(/folders\/([a-zA-Z0-9_-]+)/) ?? url.match(/[?&]id=([a-zA-Z0-9_-]+)/)
   return match ? match[1] : null
 }
 const __dirname = dirname(fileURLToPath(import.meta.url))

@@ -41,6 +41,12 @@ describe('allUploadsConfirmed', () => {
 // the inspection's own linked folder URL as the re-upload target instead
 // of asking Drive to derive it from the file.
 describe('parseFolderIdFromUrl', () => {
+  it("accepts Drive for desktop's open?id= link format (35852 Beverly)", () => {
+    expect(parseFolderIdFromUrl('https://drive.google.com/open?id=1AbCdEfGhIjKlMnOpQrStUvWxYz012345&usp=drive_fs')).toBe(
+      '1AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+    )
+  })
+
   it('extracts the folder id from a real Drive folder URL', () => {
     expect(parseFolderIdFromUrl('https://drive.google.com/drive/folders/1cU49X0csidHMzRPaUPO9NPMVeKp4D-df?usp=sharing')).toBe(
       '1cU49X0csidHMzRPaUPO9NPMVeKp4D-df'
